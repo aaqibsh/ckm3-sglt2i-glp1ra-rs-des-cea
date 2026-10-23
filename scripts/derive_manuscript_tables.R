@@ -11,13 +11,18 @@
 #       treated arms: event rates per 100 patient-years for trial comparison)
 #   outputs/tables/prevent_composite_stage3.csv          (PREVENT total CVD vs
 #       the union of the PREVENT ASCVD and HF predictions)
+#   outputs/tables/external_benchmarks_stage3.csv        (SoC subgroups matched to
+#       external CKD benchmarks: life expectancy, lifetime and 5-year kidney failure,
+#       5-year death)
+#   outputs/tables/monte_carlo_error_stage3.csv          (SE of the base case)
 # =============================================================================
 
 suppressPackageStartupMessages(library(data.table))
 source("R/02_population.R")
 
-N <- 20000; SEED <- 42; STAGE <- 3
+SEED <- 42; STAGE <- 3
 pl <- fread("outputs/tables/patient_level_stage3.csv.gz")
+N <- pl[arm == "soc", .N]   # 20,000 in production
 pop <- generate_ckm_population(N, ckm_stage = STAGE, seed = SEED)
 soc <- pl[arm == "soc"][order(pat_id)]
 stopifnot(nrow(soc) == N, isTRUE(all.equal(pop$age, soc$age)), isTRUE(all.equal(pop$egfr, soc$egfr)))
@@ -75,6 +80,29 @@ comp <- soc[, .(prevent_total_cvd = mean(prevent_total_cvd),
                 prevent_ascvd = mean(prevent_ascvd), prevent_hf = mean(prevent_hf),
                 union_ascvd_hf_independent = mean(1 - (1 - prevent_ascvd) * (1 - prevent_hf)))]
 fwrite(comp, "outputs/tables/prevent_composite_stage3.csv")
+
+# ---- External benchmarks (SoC arm) ----
+# Life expectancy and lifetime kidney failure from entry at age 55-65 y (Turin 2014,
+# 2012: age 60 y, Alberta), and 5-year death and kidney failure at age >= 65 y with
+# eGFR 30-59 (USRDS 2015: Medicare beneficiaries with CKD stage 3).
+bench <- function(sel, lab, by_sex = TRUE) {
+  d <- soc[sel]
+  f <- function(x) x[, .(n = .N, life_expectancy = mean(t_end),
+                         lifetime_kf_pct = 100 * mean(!is.na(t_eskd)),
+                         death_5y_pct = 100 * mean(t_end <= 5 & grepl("^death", end_reason)),
+                         kf_5y_pct = 100 * mean(!is.na(t_eskd) & t_eskd <= 5))]
+  out <- cbind(sex = "All", f(d))
+  if (by_sex) out <- rbind(out, cbind(sex = "Men", f(d[sex == 1])), cbind(sex = "Women", f(d[sex == 0])))
+  cbind(benchmark = lab, out)
+}
+mid <- soc$age >= 55 & soc$age <= 65
+benchmarks <- rbind(
+  bench(mid & soc$uacr >= 30 & soc$uacr < 300, "le_uacr30_299_age55_65"),
+  bench(mid & soc$egfr >= 45 & soc$egfr < 60, "egfr45_59_age55_65"),
+  bench(mid & soc$egfr >= 30 & soc$egfr < 45, "egfr30_44_age55_65"),
+  bench(soc$age >= 65 & soc$egfr >= 30 & soc$egfr < 60, "egfr30_59_age65plus"))
+fwrite(benchmarks, "outputs/tables/external_benchmarks_stage3.csv")
+print(benchmarks)
 
 print(bc[, lapply(.SD, function(x) if (is.numeric(x)) round(x, 1) else x)])
 print(rates5[, lapply(.SD, function(x) if (is.numeric(x)) round(x, 2) else x)])

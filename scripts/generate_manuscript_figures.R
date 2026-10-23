@@ -116,4 +116,8 @@ fig3 <- (tornado_panel(CMP_SOC) / tornado_panel(CMP_H2H)) +
   plot_annotation(tag_levels = "A") + plot_layout(guides = "collect") & theme(legend.position = "bottom")
 save_fig(fig3, "figure3_tornado", 8.5, 10)
 
+# eFigure 2: two-way price chart drawn by scripts/price_scenarios.R
+stopifnot(file.copy("outputs/figures/price_surface_stage3.png", file.path(out_dir, "efigure2_price_chart.png"),
+                    overwrite = TRUE))
+
 cat(sprintf("Figures written to %s\n", out_dir))
