@@ -1,0 +1,15 @@
+Package: CKMHEOR
+Title: Cost-Effectiveness Model for Cardiovascular-Kidney-Metabolic Syndrome
+Version: 0.5.0
+Description: Analysis project built on the WARDEN discrete event simulation
+    engine. Not an installable package: this file lists the R packages the
+    model needs so that GitHub Actions can install them.
+Imports:
+    WARDEN,
+    data.table,
+    ggplot2,
+    MASS,
+    flexsurv,
+    preventr,
+    dplyr,
+    scales

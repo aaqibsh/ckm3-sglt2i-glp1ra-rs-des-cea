@@ -1,0 +1,11 @@
+# Generated results (produced by the scripts or downloaded from GitHub Actions)
+outputs/
+outputs_archive_*/
+# Local reference copies
+WARDEN-ref
+*.epub
+# R / macOS clutter
+.Rhistory
+.RData
+.Rproj.user/
+.DS_Store

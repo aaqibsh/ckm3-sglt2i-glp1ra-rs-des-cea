@@ -1,0 +1,276 @@
+# CKM-HEOR model run on GitHub Actions (CKM Stage 3).
+# Start it from the repository's Actions tab ("Run workflow") or with:
+#   gh workflow run ckm-run.yml -f mode=pilot
+# task=dsa-shards reruns only the listed DSA shards (as smaller jobs: one parameter
+# per R process) and rebuilds the results from an earlier full run (reuse_run_id):
+#   gh workflow run ckm-run.yml -f mode=production -f task=dsa-shards -f shards="[7, 8]" -f reuse_run_id=<ID>
+# Each job runs on its own cloud machine (2 vCPU, 7 GB; public repositories use
+# standard runners free of charge). Jobs marked "2 processes"
+# run two R processes side by side so both vCPUs are used (billing is per job
+# minute, so this halves the cost). Nothing runs on your laptop.
+#
+# production sizes (R/00_setup.R): 20,000 patients for every deterministic run;
+# PSA 10 chunks x 50 iterations x 1,000 patients = 500 iterations.
+name: CKM model run
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "pilot = quick end-to-end check (~25 min); production = final run (~5 h)"
+        required: true
+        default: pilot
+        type: choice
+        options: [pilot, production]
+      task:
+        description: "full = whole run; dsa-shards = rerun only the DSA shards below"
+        required: true
+        default: full
+        type: choice
+        options: [full, dsa-shards]
+      shards:
+        description: "dsa-shards only: shards to rerun, as a list"
+        required: false
+        default: "[7, 8]"
+        type: string
+      reuse_run_id:
+        description: "dsa-shards only: ID of the earlier full run whose results are reused"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ckm-model-run
+  cancel-in-progress: false
+
+env:
+  CKM_MODE: ${{ inputs.mode }}
+
+jobs:
+  check:
+    name: Tests and validation
+    if: ${{ inputs.task == 'full' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ckm
+      - name: Helper unit checks
+        run: Rscript tests/test_helpers.R
+      - name: End-to-end validation (12 checks)
+        run: Rscript analysis/validate_minimal.R
+
+  base:
+    name: Base case (patient-level outputs)
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ckm
+      # Runs alone: the patient-level event log needs ~5 GB at 20,000 patients
+      - name: Base case
+        run: bash ci/run_parallel.sh base_case_stage3 "Rscript analysis/run_base_case.R 3"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: base-stage3
+          path: |
+            outputs/tables/
+            outputs/logs/
+          retention-days: 7
+
+  # 20 structural scenarios in 10 parts (2 per R process) and 4 agent runs in 2 parts
+  scenarios:
+    name: Scenarios ${{ matrix.group }} parts ${{ matrix.a }}+${{ matrix.b }} (2 processes)
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {group: structural, a: 1, b: 2, n: 10}
+          - {group: structural, a: 3, b: 4, n: 10}
+          - {group: structural, a: 5, b: 6, n: 10}
+          - {group: structural, a: 7, b: 8, n: 10}
+          - {group: structural, a: 9, b: 10, n: 10}
+          - {group: agents, a: 1, b: 2, n: 2}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ckm
+      - name: Scenarios
+        run: >
+          bash ci/run_parallel.sh
+          scenarios_${{ matrix.group }}_part${{ matrix.a }} "Rscript analysis/run_scenarios.R 3 ${{ matrix.group }} ${{ matrix.a }} ${{ matrix.n }}"
+          scenarios_${{ matrix.group }}_part${{ matrix.b }} "Rscript analysis/run_scenarios.R 3 ${{ matrix.group }} ${{ matrix.b }} ${{ matrix.n }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scenarios-${{ matrix.group }}-${{ matrix.a }}-${{ matrix.b }}
+          path: |
+            outputs/tables/
+            outputs/logs/
+          retention-days: 7
+
+  dsa:
+    name: DSA shards ${{ matrix.a }}+${{ matrix.b }} (2 processes)
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {a: 1, b: 2}
+          - {a: 3, b: 4}
+          - {a: 5, b: 6}
+          - {a: 7, b: 8}
+          - {a: 9, b: 10}
+          - {a: 11, b: 12}
+          - {a: 13, b: 14}
+          - {a: 15, b: 16}
+          - {a: 17, b: 18}
+          - {a: 19, b: 20}
+          - {a: 21, b: 22}
+          - {a: 23, b: 24}
+          - {a: 25, b: 26}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ckm
+      - name: DSA
+        run: >
+          bash ci/run_parallel.sh
+          dsa_stage3_shard${{ matrix.a }} "Rscript analysis/run_dsa.R 3 ${{ matrix.a }} 26"
+          dsa_stage3_shard${{ matrix.b }} "Rscript analysis/run_dsa.R 3 ${{ matrix.b }} 26"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dsa-shards-${{ matrix.a }}-${{ matrix.b }}
+          path: |
+            outputs/tables/
+            outputs/logs/
+          retention-days: 7
+
+  psa:
+    name: PSA chunks ${{ matrix.a }}+${{ matrix.b }} (2 processes)
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {a: 1, b: 2}
+          - {a: 3, b: 4}
+          - {a: 5, b: 6}
+          - {a: 7, b: 8}
+          - {a: 9, b: 10}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ckm
+      - name: PSA
+        run: >
+          bash ci/run_parallel.sh
+          psa_stage3_chunk${{ matrix.a }} "Rscript analysis/run_psa.R 3 ${{ matrix.a }}"
+          psa_stage3_chunk${{ matrix.b }} "Rscript analysis/run_psa.R 3 ${{ matrix.b }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: psa-chunks-${{ matrix.a }}-${{ matrix.b }}
+          path: |
+            outputs/psa/
+            outputs/logs/
+          retention-days: 7
+
+  combine:
+    name: Combine results
+    needs: [check, base, scenarios, dsa, psa]
+    if: ${{ !cancelled() && needs.check.result == 'success' && needs.base.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ckm
+      - uses: actions/download-artifact@v4
+        with:
+          path: outputs
+          merge-multiple: true
+      - name: Combine
+        run: |
+          Rscript analysis/combine_results.R
+          Rscript scripts/price_scenarios.R
+      - name: Show results on the run page
+        run: cat outputs/RESULTS_SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ckm-results-${{ inputs.mode }}
+          path: outputs/
+          retention-days: 90
+
+  # ---- task = dsa-shards: rerun some DSA shards, reuse everything else ----
+  dsa_rerun:
+    name: DSA shard ${{ matrix.shard }} parts ${{ matrix.parts.a }}+${{ matrix.parts.b }} (2 processes)
+    if: ${{ inputs.task == 'dsa-shards' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(inputs.shards) }}
+        parts:
+          - {a: 1, b: 2}
+          - {a: 3, b: 4}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ckm
+      - name: DSA
+        run: >
+          bash ci/run_parallel.sh
+          dsa_stage3_shard${{ matrix.shard }}_part${{ matrix.parts.a }} "Rscript analysis/run_dsa.R 3 ${{ matrix.shard }} 26 ${{ matrix.parts.a }} 4"
+          dsa_stage3_shard${{ matrix.shard }}_part${{ matrix.parts.b }} "Rscript analysis/run_dsa.R 3 ${{ matrix.shard }} 26 ${{ matrix.parts.b }} 4"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dsa-rerun-shard${{ matrix.shard }}-parts-${{ matrix.parts.a }}-${{ matrix.parts.b }}
+          path: |
+            outputs/tables/
+            outputs/logs/
+          retention-days: 7
+
+  combine_rerun:
+    name: Combine results (with rerun DSA shards)
+    needs: dsa_rerun
+    if: ${{ !cancelled() && inputs.task == 'dsa-shards' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ckm
+      # Base case, scenarios, the other DSA shards and the PSA from the earlier run
+      - uses: actions/download-artifact@v4
+        with:
+          name: ckm-results-${{ inputs.mode }}
+          run-id: ${{ inputs.reuse_run_id }}
+          github-token: ${{ github.token }}
+          path: outputs
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dsa-rerun-*
+          path: outputs
+          merge-multiple: true
+      - name: Combine
+        run: |
+          Rscript analysis/combine_results.R
+          Rscript scripts/price_scenarios.R
+      - name: Show results on the run page
+        run: cat outputs/RESULTS_SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ckm-results-${{ inputs.mode }}
+          path: outputs/
+          retention-days: 90
