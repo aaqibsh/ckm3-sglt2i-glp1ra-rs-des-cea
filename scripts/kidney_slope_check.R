@@ -57,12 +57,16 @@ out <- rbindlist(lapply(names(sets), function(nm) {
              matched_ratio = 1 - trial[[cls]] / dec)
 }))
 print(out[, lapply(.SD, function(x) if (is.numeric(x)) round(x, 3) else x)])
-if ("--write" %in% commandArgs(trailingOnly = TRUE)) fwrite(out, "outputs/tables/kidney_slope_check_stage3.csv")
 
 sdlog <- pv("egfr_slope_sdlog")
 set.seed(SEED)
-slopes <- ref * egfr_patient_multiplier(pop$uacr, beta, sdlog, rnorm(nrow(pop)))
-cat(sprintf("Whole cohort (eGFR >= 45 rate): untreated decline mean %.2f, median %.2f, IQR %.2f-%.2f mL/min/1.73 m2 per year\n",
-            mean(slopes), median(slopes), quantile(slopes, 0.25), quantile(slopes, 0.75)))
-cat(sprintf("Kidney effect eligible (UACR >= 30 mg/g or eGFR < 60): %.1f%%\n",
-            100 * mean(pop$uacr >= 30 | pop$egfr < 60)))
+band_m <- ifelse(pop$egfr < 30, m4, ifelse(pop$egfr < 45, m3b, 1))
+slopes <- ref * band_m * egfr_patient_multiplier(pop$uacr, beta, sdlog, rnorm(nrow(pop)))
+cohort <- data.table(population = "Whole cohort at baseline", n = nrow(pop), mean_uacr = mean(pop$uacr),
+                     median_uacr = median(pop$uacr), mean_egfr = mean(pop$egfr), untreated_decline = mean(slopes),
+                     median_decline = median(slopes), p25_decline = quantile(slopes, 0.25),
+                     p75_decline = quantile(slopes, 0.75),
+                     pct_kidney_effect_eligible = 100 * mean(pop$uacr >= 30 | pop$egfr < 60))
+print(cohort)
+if ("--write" %in% commandArgs(trailingOnly = TRUE))
+  fwrite(rbind(out, cohort, fill = TRUE), "outputs/tables/kidney_slope_check_stage3.csv")
