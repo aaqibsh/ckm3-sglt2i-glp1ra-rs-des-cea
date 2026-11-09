@@ -8,6 +8,7 @@ Description: Analysis project built on the WARDEN discrete event simulation
 Imports:
     WARDEN,
     data.table,
+    R.utils,
     ggplot2,
     MASS,
     flexsurv,
