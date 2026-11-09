@@ -2,8 +2,8 @@
 # File: 08_run_model.R
 # Purpose: Main orchestrator — ties all modules together and calls WARDEN
 # Author: CKM-HEOR Team
-# Date: 2026-09-28 (revised — params argument, built-in DSA, eGFR trajectory,
-#       arm-generic treatment effects)
+# Date: 2026-11-09 (revised — PREVENT full model, GLP-1 RA price by diabetes,
+#       kidney bands and dialysis state, R3 scenarios)
 # =============================================================================
 
 #' Build the input_block() for the model parameters
@@ -163,6 +163,9 @@ run_ckm_model <- function(
     # and lognormal heterogeneity, drawn once per patient so all arms share it
     egfr_z       <- rnorm(1)
     egfr_pt_mult <- egfr_patient_multiplier(pt_uacr, egfr_uacr_beta, egfr_slope_sdlog, egfr_z)
+    # Uniform draw for the dialysis decision (dialysis_forgo scenario); drawn in every
+    # run so random streams are the same across scenarios
+    u_dialysis   <- runif(1)
 
     # ---- Initialize state ----
     fl_prior_mi     <- 0
@@ -189,10 +192,14 @@ run_ckm_model <- function(
     tx_eff          <- on_tx_arm   # fraction of treatment effect retained
     wane_step       <- 0
 
-    hr_mace_arm <- if (arm == "sglt2i") hr_sglt2i_mace else if (arm == "glp1ra") hr_glp1_mace else 1
-    hr_hf_arm   <- if (arm == "sglt2i") hr_sglt2i_hf else if (arm == "glp1ra") hr_glp1_hf else 1
-    hr_cvd_arm  <- if (arm == "sglt2i") hr_sglt2i_cv_death else if (arm == "glp1ra") hr_glp1_cv_death else 1
-    egfr_slope_ratio_arm <- if (arm == "sglt2i") sglt2i_egfr_slope_ratio else if (arm == "glp1ra") glp1_egfr_slope_ratio else 1
+    # GLP-1 RA effects: FLOW in type 2 diabetes when glp1_flow_dm = 1, class otherwise
+    flow_pt   <- glp1_flow_dm == 1 && pt_dm == 1
+    glp1_hrs  <- if (flow_pt) c(hr_flow_mace, hr_flow_hf, hr_flow_cv_death, flow_egfr_slope_ratio) else
+      c(hr_glp1_mace, hr_glp1_hf, hr_glp1_cv_death, glp1_egfr_slope_ratio)
+    hr_mace_arm <- if (arm == "sglt2i") hr_sglt2i_mace else if (arm == "glp1ra") glp1_hrs[1] else 1
+    hr_hf_arm   <- if (arm == "sglt2i") hr_sglt2i_hf else if (arm == "glp1ra") glp1_hrs[2] else 1
+    hr_cvd_arm  <- if (arm == "sglt2i") hr_sglt2i_cv_death else if (arm == "glp1ra") glp1_hrs[3] else 1
+    egfr_slope_ratio_arm <- if (arm == "sglt2i") sglt2i_egfr_slope_ratio else if (arm == "glp1ra") glp1_hrs[4] else 1
     # Kidney effect only with albuminuria or reduced eGFR (scenario)
     kidney_eligible <- kidney_effect_restrict == 0 || pt_uacr >= 30 || pt_egfr < 60
     if (!kidney_eligible) egfr_slope_ratio_arm <- 1
@@ -200,12 +207,16 @@ run_ckm_model <- function(
     util_gain_arm    <- if (arm == "sglt2i") util_gain_sglt2i else if (arm == "glp1ra") util_gain_glp1 else 0
 
     # ---- Drug price by payer: commercial before age_medicare, Medicare after ----
-    price_com <- if (arm == "sglt2i") cost_sglt2i else if (arm == "glp1ra") cost_glp1ra else 0
+    # GLP-1 RA commercial price: Ozempic-adjusted with type 2 diabetes
+    price_glp1_com <- cost_glp1ra * (if (pt_dm == 1) glp1_dm_price_ratio else 1)
+    price_com <- if (arm == "sglt2i") cost_sglt2i else if (arm == "glp1ra") price_glp1_com else 0
     price_mcr <- if (arm == "sglt2i") cost_sglt2i_mcr else if (arm == "glp1ra") cost_glp1ra_mcr else 0
     fl_mcr    <- as.numeric(pt_age >= age_medicare)
 
-    # ---- Add-on SGLT2i in the SoC and GLP-1 RA arms (addon_sglt2i scenario) ----
+    # ---- Add-on SGLT2i in the SoC and GLP-1 RA arms (addon_sglt2i scenario) or
+    # add-on GLP-1 RA in the SGLT2i arm (addon_glp1 scenario) ----
     addon_on    <- 0
+    addon_type  <- "none"
     addon_mult  <- addon_multipliers(0, 1, 1, 1)
     addon_slope <- 1
 
@@ -213,15 +224,21 @@ run_ckm_model <- function(
     egfr_cur   <- pt_egfr
     egfr_ref   <- pt_egfr
     t_egfr_ref <- 0
-    egfr_slope <- egfr_decline_ref * egfr_pt_mult * hr_effective(egfr_slope_ratio_arm, tx_eff) * addon_slope
+    # Kidney state: stage 3b (eGFR < 45), dialysis
+    fl_ckd3b    <- as.numeric(pt_egfr < 45)
+    fl_dialysis <- 0
+    fl_conservative <- 0
+    egfr_slope <- egfr_decline_ref * egfr_pt_mult * hr_effective(egfr_slope_ratio_arm, tx_eff) * addon_slope *
+      kidney_band_multiplier(ckd_stage, fl_ckd3b, egfr_mult_3b, egfr_mult_4)
     t_next_ckd <- time_to_next_ckd_stage(egfr_cur, egfr_slope, ckd_stage)
+    t_egfr45   <- if (fl_ckd3b == 0) time_to_egfr(egfr_cur, egfr_slope, 45) else Inf
 
     # ---- Event hazards (untreated x recurrence x treatment) ----
     h_base <- calculate_base_hazards(
       pt_age, pt_sex, cur_sbp, pt_tc, pt_hdl, pt_dm, pt_smk,
       egfr_cur, pt_statin, pt_antihyp, pt_bmi, cur_hba1c,
       fl_prior_mi, fl_prior_stroke, fl_prior_hf, ckd_stage, cvd_mult,
-      bg_mort_mult, prevent_age_cap, hf_hosp_frac
+      bg_mort_mult, prevent_age_cap, hf_hosp_frac, pt_uacr, prevent_full
     )
     h_cur <- total_event_hazards(h_base, rr_state, hr_mace_arm, hr_hf_arm, hr_cvd_arm, tx_eff, addon_mult)
 
@@ -229,9 +246,10 @@ run_ckm_model <- function(
     cost_background <- cost_bg_base + cost_bg_age_coef * max(0, pt_age - 50)
 
     q_default <- util_baseline + util_gain_arm -
-      ckd_state_disutility(ckd_stage, util_dec_ckd3, util_dec_ckd4, util_dec_eskd)
+      ckd_state_disutility(ckd_stage, fl_dialysis, util_dec_ckd3, util_dec_ckd4, util_dec_eskd)
     c_default <- cost_background + cost_soc +
-      ckd_state_cost(ckd_stage, cost_ckd3_annual, cost_ckd4_annual, cost_eskd_annual)
+      ckd_state_cost(ckd_stage, fl_ckd3b, fl_dialysis, cost_ckd3a_annual, cost_ckd3b_annual,
+                     cost_ckd4_annual, cost_eskd_annual)
     # Drug cost in the commercial and Medicare periods; both stop at discontinuation
     # (06_reactions.R). c_addon: add-on SGLT2i (scenario)
     c_drug_com <- if (fl_mcr == 0) price_com else 0
@@ -278,7 +296,7 @@ run_ckm_model <- function(
     ipd                = ipd_level,
     input_out          = c("n_mi", "n_stroke", "n_hf", "fl_eskd", "ckd_stage",
                            "fl_on_treatment", "pt_age", "pt_age_baseline", "egfr_cur",
-                           "addon_on", "fl_mcr")
+                           "addon_on", "fl_mcr", "fl_dialysis", "fl_conservative")
   )
   results <- if (n_cores > 1) {
     do.call(WARDEN::run_sim_parallel, c(sim_args, list(ncores = n_cores)), quote = TRUE)

@@ -4,9 +4,14 @@
 # =============================================================================
 # Compares the absolute eGFR slope difference implied by the class slope ratios
 # with the differences reported in DAPA-CKD (dapagliflozin vs placebo, total
-# slope 0.95 mL/min/1.73 m2 per year; Heerspink 2021) and FLOW (semaglutide vs
-# placebo, 1.16; Perkovic 2024). Generates the base-case cohort only (no
-# simulation, nothing written). Usage: Rscript scripts/kidney_slope_check.R
+# slope 0.95 mL/min/1.73 m2 per year, placebo 3.83; Heerspink 2021) and FLOW
+# (semaglutide vs placebo, 1.16, placebo 3.36; Perkovic 2024), in two sets of
+# patients: simulated cohort members meeting each trial's entry criteria, and
+# populations with each trial's baseline eGFR and UACR (as in
+# scripts/calibrate_kidney.R). Also gives the trial-slope-matched ratios
+# 1 - trial difference / model untreated decline in the trial populations.
+# No simulation. Usage: Rscript scripts/kidney_slope_check.R [--write]
+#   --write: outputs/tables/kidney_slope_check_stage3.csv
 # =============================================================================
 
 suppressMessages({
@@ -19,23 +24,45 @@ suppressMessages({
 pop <- generate_ckm_population(20000, 3, seed = SEED)
 pv  <- function(nm) l_params$base_value[[match(nm, unlist(l_params$parameter_name))]]
 ref <- pv("egfr_decline_ref"); beta <- pv("egfr_uacr_beta")
+m3b <- pv("egfr_mult_3b"); m4 <- pv("egfr_mult_4")
 ratio <- c(sglt2i = pv("sglt2i_egfr_slope_ratio"), glp1ra = pv("glp1_egfr_slope_ratio"))
 
-# Mean untreated decline: the patient-level heterogeneity multiplier has mean 1
-mean_decline <- function(d) ref * mean((pmax(d$uacr, 3) / 30)^beta)
+# Mean untreated decline at baseline: the heterogeneity multiplier has mean 1
+mean_decline <- function(d) {
+  band_m <- ifelse(d$egfr < 30, m4, ifelse(d$egfr < 45, m3b, 1))
+  ref * mean((pmax(d$uacr, 3) / 30)^beta * band_m)
+}
+trial_pop <- function(n, egfr_mean, egfr_sd, uacr_med, uacr_sdlog) {
+  set.seed(SEED)
+  e <- rnorm(4 * n, egfr_mean, egfr_sd); e <- e[e >= 25 & e <= 75][seq_len(n)]
+  data.table(egfr = e, uacr = exp(rnorm(n, log(uacr_med), uacr_sdlog)))
+}
 
-dapa <- pop[egfr >= 25 & egfr <= 75 & uacr >= 200 & uacr <= 5000]
-flow <- pop[diabetes == 1 & ((egfr >= 50 & egfr <= 75 & uacr > 300 & uacr < 5000) |
-                             (egfr >= 25 & egfr < 50 & uacr > 100 & uacr < 5000))]
+sets <- list(
+  "DAPA-CKD entry criteria (simulated cohort)" = pop[egfr >= 25 & egfr <= 75 & uacr >= 200 & uacr <= 5000],
+  "FLOW entry criteria (simulated cohort)" = pop[diabetes == 1 & ((egfr >= 50 & egfr <= 75 & uacr > 300 & uacr < 5000) |
+                                                                (egfr >= 25 & egfr < 50 & uacr > 100 & uacr < 5000))],
+  "DAPA-CKD baseline eGFR and UACR" = trial_pop(20000, 43.1, 12.4, 949, log(1885 / 477) / (2 * qnorm(0.75))),
+  "FLOW baseline eGFR and UACR" = trial_pop(20000, 47.0, 15.2, 568, log(3225 / 51) / (2 * qnorm(0.95)))
+)
+trial <- c(sglt2i = 0.95, glp1ra = 1.16)
+placebo <- c(sglt2i = 3.83, glp1ra = 3.36)
+out <- rbindlist(lapply(names(sets), function(nm) {
+  d <- sets[[nm]]; cls <- if (grepl("DAPA", nm)) "sglt2i" else "glp1ra"
+  dec <- mean_decline(d)
+  data.table(population = nm, class = cls, n = nrow(d), mean_uacr = mean(d$uacr), median_uacr = median(d$uacr),
+             mean_egfr = mean(d$egfr), untreated_decline = dec, trial_placebo_slope = placebo[[cls]],
+             slope_ratio = ratio[[cls]], implied_difference = (1 - ratio[[cls]]) * dec,
+             trial_difference = trial[[cls]], pct_of_trial = 100 * (1 - ratio[[cls]]) * dec / trial[[cls]],
+             matched_ratio = 1 - trial[[cls]] / dec)
+}))
+print(out[, lapply(.SD, function(x) if (is.numeric(x)) round(x, 3) else x)])
+if ("--write" %in% commandArgs(trailingOnly = TRUE)) fwrite(out, "outputs/tables/kidney_slope_check_stage3.csv")
 
 sdlog <- pv("egfr_slope_sdlog")
 set.seed(SEED)
 slopes <- ref * egfr_patient_multiplier(pop$uacr, beta, sdlog, rnorm(nrow(pop)))
-cat(sprintf("Whole cohort: untreated decline mean %.2f, median %.2f, IQR %.2f-%.2f mL/min/1.73 m2 per year\n",
-            mean_decline(pop), median(slopes), quantile(slopes, 0.25), quantile(slopes, 0.75)))
-cat(sprintf("DAPA-CKD entry criteria: n = %d, untreated decline %.2f, SGLT2i difference %.2f (trial 0.95)\n",
-            nrow(dapa), mean_decline(dapa), (1 - ratio[["sglt2i"]]) * mean_decline(dapa)))
-cat(sprintf("FLOW entry criteria: n = %d, untreated decline %.2f, GLP-1 RA difference %.2f (trial 1.16)\n",
-            nrow(flow), mean_decline(flow), (1 - ratio[["glp1ra"]]) * mean_decline(flow)))
+cat(sprintf("Whole cohort (eGFR >= 45 rate): untreated decline mean %.2f, median %.2f, IQR %.2f-%.2f mL/min/1.73 m2 per year\n",
+            mean(slopes), median(slopes), quantile(slopes, 0.25), quantile(slopes, 0.75)))
 cat(sprintf("Kidney effect eligible (UACR >= 30 mg/g or eGFR < 60): %.1f%%\n",
             100 * mean(pop$uacr >= 30 | pop$egfr < 60)))

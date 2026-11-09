@@ -49,15 +49,15 @@ for (stage in stages) {
 
   fwrite(s$arms, sprintf("outputs/tables/base_case_stage%d_arms.csv", stage))
   fwrite(s$incremental, sprintf("outputs/tables/base_case_stage%d_incremental.csv", stage))
-  thr <- threshold_prices(s$arms, s$incremental, l_params)[, stage := stage]
-  print(thr[wtp == WTP_THRESHOLD, .(comparison, current_price, threshold_price = round(threshold_price))])
-  fwrite(thr, sprintf("outputs/tables/threshold_prices_stage%d.csv", stage))
 
   # ---- Patient-level outputs (subgroups, event burden, validation) ----
   pop <- generate_ckm_population(n_pat, ckm_stage = stage, seed = SEED)
   ps <- patient_summary(res, pop)
   stopifnot(isTRUE(all.equal(ps[, mean(costs), keyby = arm]$V1,
                              unname(res[[1]][[1]]$total_costs[sort(names(res[[1]][[1]]$total_costs))]))))
+  thr <- threshold_prices(ps, l_params)[, stage := stage]
+  print(thr[wtp == WTP_THRESHOLD, .(comparison, current_price, threshold_price = round(threshold_price))])
+  fwrite(thr, sprintf("outputs/tables/threshold_prices_stage%d.csv", stage))
   fwrite(ps, sprintf("outputs/tables/patient_level_stage%d.csv.gz", stage))
   fwrite(subgroup_table(ps, wtp = WTP_THRESHOLD)[, stage := stage],
          sprintf("outputs/tables/subgroups_stage%d.csv", stage))

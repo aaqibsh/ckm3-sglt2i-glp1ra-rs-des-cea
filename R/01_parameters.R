@@ -2,8 +2,8 @@
 # File: 01_parameters.R
 # Purpose: Master parameter file for CKM-HEOR using WARDEN
 # Author: CKM-HEOR Team
-# Date: 2026-10-14 (revised — class HRs corrected to source meta-analyses,
-#       time-horizon parameter)
+# Date: 2026-11-09 (revised — sourced 2025 costs, GLP-1 RA price by diabetes,
+#       PREVENT full model, R3 scenario switches)
 # ==============================================================================
 # WARDEN's input_block() expects parallel lists:
 #   base           = list(val1, val2, ...)
@@ -54,7 +54,7 @@ build_param_lists <- function() {
     # Endocrinol 2025;13:15-28 (11 trials incl. FLOW and SELECT); same method as SGLT2i
     list("glp1_egfr_slope_ratio", 0.81, "rlnorm", log(0.81), se_log(0.72, 0.92), 0.72, 0.92),
 
-    # ---- Costs (2025 USD) ----
+    # ---- Costs (2025 USD; drug prices 2025-2027) ----
     # Drug prices depend on the payer, which depends on age: commercial net price
     # before age_medicare, Medicare negotiated price (maximum fair price, MFP) from
     # age_medicare. Drug cost is linear in each price, so price scenarios are
@@ -64,39 +64,53 @@ build_param_lists <- function() {
     # $4,250/y; range = 30% rebate ($2,972) to 2025 WAC (~$6,500; 2026 CKM guideline)
     list("cost_sglt2i",        4250, "rgamma_mse",  4250,      (6500-2972)/3.92,            2972, 6500),
     # GLP-1 RA commercial: semaglutide net price $6,829/y (SSR Health, ICER obesity
-    # final report, 16 Dec 2025); range = self-pay price $349/mo to 2027 list price
-    # $675/mo (Novo Nordisk, effective 1 Jan 2027)
+    # final report, 16 Dec 2025; Wegovy-based), applied without type 2 diabetes;
+    # range = self-pay price $349/mo to 2027 list price $675/mo (Novo Nordisk,
+    # effective 1 Jan 2027)
     list("cost_glp1ra",        6830, "rgamma_mse",  6830,      (8100-4188)/3.92,            4188, 8100),
+    # With type 2 diabetes the commercial price is the semaglutide net price x the
+    # Ozempic/Wegovy list-price ratio (1,028/1,349 = 0.762; $5,205/y). DSA range =
+    # Ozempic self-pay price ($349/mo, ratio 0.613) to the Wegovy-based net price (1).
+    # Moves with cost_glp1ra in the PSA
+    list("glp1_dm_price_ratio", 1028/1349, "rnorm", 1028/1349, 0,                          4188/6830, 1, 0, 1),
     # Medicare: empagliflozin MFP $197 per 30 days (2026) = $2,397/y; DSA range
     # dapagliflozin MFP $178.50/30 d ($2,172/y) to +10%. Statutory: fixed in PSA
     list("cost_sglt2i_mcr",    2397, "rnorm",       2397,      0,                           2172, 2637, 0, 1),
     # Medicare: semaglutide MFP $274 per 30 days (from 1 Jan 2027) = $3,334/y; DSA
     # range $245/mo GLP-1 Bridge price ($2,940/y) to +10%. Fixed in PSA
     list("cost_glp1ra_mcr",    3334, "rnorm",       3334,      0,                           2940, 3667, 0, 1),
-    # Source: Generic statins, ACEi/ARB
+    # Non-drug costs: source value x PCE health care price index (BEA; FRED
+    # DHLCRG3A086NBEA, 2025 = 120.920; 2022 = 112.045, 2019 = 103.688, 2012 = 94.485).
+    # SE = 18% and DSA = +/-20% of the base value unless stated.
+    # Assumption: generic statin, ACE inhibitor/ARB, monitoring
     list("cost_soc",           1200, "rgamma_mse",  1200,      240,                         960,  1440),
-    # Source: HCUP NIS
-    list("cost_mi_acute",     28000, "rgamma_mse", 28000,      5000,                       22400, 33600),
-    # Source: HCUP NIS
-    list("cost_stroke_acute", 25000, "rgamma_mse", 25000,      4500,                       20000, 30000),
-    # Source: HCUP NIS
-    list("cost_hf_hosp",      16500, "rgamma_mse", 16500,      3000,                       13200, 19800),
-    # Source: Published literature
-    list("cost_mi_post",       3200, "rgamma_mse",  3200,      600,                         2560, 3840),
-    # Source: Published literature
-    list("cost_stroke_post",   8000, "rgamma_mse",  8000,      1500,                        6400, 9600),
-    # Source: Published literature
-    list("cost_hf_post",       5500, "rgamma_mse",  5500,      1000,                        4400, 6600),
-    # Source: Published literature
-    list("cost_ckd3_annual",   7500, "rgamma_mse",  7500,      1500,                        6000, 9000),
-    # Source: Published literature
-    list("cost_ckd4_annual",  15000, "rgamma_mse", 15000,      3000,                       12000, 18000),
-    # Source: USRDS 2024 ADR (total per-patient ESKD spending; replaces CKD 4 cost)
-    list("cost_eskd_annual",  92000, "rgamma_mse", 92000,      10000,                      73600, 110400),
-    # Source: MEPS
-    list("cost_bg_base",       6000, "rgamma_mse",  6000,      1200,                        4800, 7200),
-    # Source: MEPS (added each year of age above 50, updated annually)
-    list("cost_bg_age_coef",    150, "rgamma_mse",   150,      30,                          120,  180),
+    # HCUP Statistical Brief #316 (2022 NIS, all payers, Table 1): aggregate hospital
+    # cost / stays. AMI $16,332 million / 582,000 = $28,062 (2022 USD)
+    list("cost_mi_acute",     30285, "rgamma_mse", 30285,      5451,                       24228, 36342),
+    # Cerebral infarction $10,940 million / 542,000 = $20,185 (2022 USD)
+    list("cost_stroke_acute", 21784, "rgamma_mse", 21784,      3921,                       17427, 26141),
+    # Heart failure $18,236 million / 1,098,000 = $16,608 (2022 USD)
+    list("cost_hf_hosp",      17924, "rgamma_mse", 17924,      3226,                       14339, 21509),
+    # Ward et al. J Med Econ 2014 annual state costs after the event year (2012 USD):
+    # MI $1,904, ischemic stroke $15,541, congestive HF $1,904
+    list("cost_mi_post",       2437, "rgamma_mse",  2437,      439,                         1950, 2924),
+    list("cost_stroke_post",  19889, "rgamma_mse", 19889,      3580,                       15911, 23867),
+    list("cost_hf_post",       2437, "rgamma_mse",  2437,      439,                         1950, 2924),
+    # Added annual cost by CKD stage (Tisdale et al. J Gen Intern Med 2022, from
+    # Erickson et al. 2013; 2019 USD): 3a $196/mo, 3b $482/mo, 4 $625/mo (also kidney
+    # failure without kidney replacement therapy)
+    list("cost_ckd3a_annual",  2743, "rgamma_mse",  2743,      494,                         2194, 3292),
+    list("cost_ckd3b_annual",  6745, "rgamma_mse",  6745,      1214,                        5396, 8094),
+    list("cost_ckd4_annual",   8746, "rgamma_mse",  8746,      1574,                        6997, 10495),
+    # Dialysis: USRDS 2024 ADR, Medicare FFS spending per person-year, in-center
+    # hemodialysis, $99,369 (2022 USD); replaces the CKD 4 cost
+    list("cost_eskd_annual", 107240, "rgamma_mse", 107240,     19303,                      85792, 128688),
+    # Background spending: MEPS 2022 mean expenditure per person, $8,406 at 45-64 y
+    # and $13,524 at >=65 y, linear between ages 54.5 and 75 (2022 USD: $7,282 at
+    # 50 y, $249.7 per year of age)
+    list("cost_bg_base",       7859, "rgamma_mse",  7859,      1415,                        6287, 9431),
+    # Added each year of age above 50, updated annually
+    list("cost_bg_age_coef",    269.4, "rgamma_mse", 269.4,    48.5,                        215.5, 323.3),
 
     # ---- Utilities ----
     # Source: Sullivan et al. 2011 US norms
@@ -109,7 +123,8 @@ build_param_lists <- function() {
     list("util_dec_hf",         0.10, "rbeta_mse",  0.10,      0.02,                        0.08,  0.12),
     list("util_dec_ckd3",       0.02, "rbeta_mse",  0.02,      0.01,                        0.016, 0.024),
     list("util_dec_ckd4",       0.05, "rbeta_mse",  0.05,      0.01,                        0.04,  0.06),
-    # Applied on top of the CKD 4 decrement (dialysis utility ~0.56-0.58, Wyld et al. 2012)
+    # Applied on top of the CKD 4 decrement while on dialysis (dialysis utility
+    # ~0.56-0.58, Wyld et al. 2012)
     list("util_dec_eskd",       0.20, "rbeta_mse",  0.20,      0.04,                        0.16,  0.24),
 
     # ---- Treatment Discontinuation ----
@@ -122,16 +137,23 @@ build_param_lists <- function() {
     list("tx_wane_years",       1.0,  "rnorm",      1.0,       0,                           0,    2.0,  0, 1),
 
     # ---- Natural history: chronic eGFR decline (SoC) ----
-    # Patient slope = egfr_decline_ref x (UACR/30)^egfr_uacr_beta x exp(sd*Z - sd^2/2).
-    # egfr_decline_ref and egfr_slope_sdlog calibrated jointly so that the model's
-    # death-free 2- and 5-year kidney failure risk in eGFR < 60 matches the KFRE
-    # (4-variable, North American; Tangri 2016): 1.10% vs 1.12% and 4.16% vs 4.10%.
-    # Implied mean slope 3.1 mL/min/yr at UACR 950 (DAPA-CKD placebo ~3.6).
-    list("egfr_decline_ref",    0.65, "rgamma_mse", 0.65,      0.08,                        0.50, 0.80),
+    # Patient slope = egfr_decline_ref x (UACR/30)^egfr_uacr_beta x exp(sd*Z - sd^2/2),
+    # x egfr_mult_4 below eGFR 30 (egfr_mult_3b at 30-44 fitted as 1).
+    # Calibrated (scripts/calibrate_kidney.R) to death-free 2- and 5-year kidney
+    # failure by eGFR band in eGFR < 60 (4-variable North American KFRE; Tangri 2016)
+    # and to placebo eGFR slopes in populations with the DAPA-CKD and FLOW baseline
+    # eGFR and UACR (3.83 and 3.36 mL/min/1.73 m2 per year): KFRE all bands within
+    # 20% except 5-year risk at eGFR 45-59 (+75%); trial slopes -15% and -19%.
+    # No single parameter set matched both target sets (equal-weight least squares).
+    list("egfr_decline_ref",    0.608, "rgamma_mse", 0.608,    0.075,                       0.468, 0.748),
     # KFRE log(UACR) coefficient (time to threshold ~ 1/slope, so HR ~ slope ratio)
     # Both varied in the PSA (normal, SD = DSA range / 3.92)
     list("egfr_uacr_beta",      0.451, "rnorm",     0.451,     (0.55-0.35)/3.92,            0.35, 0.55),
-    list("egfr_slope_sdlog",    1.5,  "rnorm",      1.5,       (1.8-1.2)/3.92,              1.2,  1.8),
+    list("egfr_slope_sdlog",    1.29, "rnorm",      1.29,      (1.59-0.99)/3.92,            0.99, 1.59),
+    # Decline-rate multipliers at eGFR 30-44 (fitted 1; fixed) and < 30 (fitted 1.25;
+    # range 1 = one rate at every eGFR, to 1.5)
+    list("egfr_mult_3b",        1,    "rnorm",      1,         0,                           1,    1,    0, 0),
+    list("egfr_mult_4",         1.25, "rnorm",      1.25,      (1.5-1.0)/3.92,              1.0,  1.5),
 
     # ---- Natural history: biomarker drift (applied equally to all arms) ----
     # SBP rise with age (mmHg/yr); HbA1c drift in diabetes (%/yr, UKPDS-type drift)
@@ -165,9 +187,34 @@ build_param_lists <- function() {
     # SGLT2i stopped at kidney failure (KDIGO 2024: continue until dialysis or
     # transplant); 0 = continued for life
     list("stop_sglt2i_at_kf",   1,    "rnorm",      1,         0,                           1,    1,    0, 0),
+    # GLP-1 RA stopped at kidney failure (dialysis start); 0 = continued for life
+    list("stop_glp1_at_kf",     0,    "rnorm",      0,         0,                           0,    0,    0, 0),
     # 1 = SoC and GLP-1 RA arms start an SGLT2i at the first HF hospitalization or
     # at CKD stage 4 (guideline class 1 indications)
     list("addon_sglt2i",        0,    "rnorm",      0,         0,                           0,    0,    0, 0),
+    # 1 = SGLT2i arm adds a GLP-1 RA at 1 year in type 2 diabetes with persistent
+    # albuminuria: baseline UACR x (1 - SGLT2i UACR reduction) >= addon_glp1_uacr
+    # (guideline: UACR >= 100 mg/g on first-line therapy; DAPA-CKD UACR -35.1% with
+    # type 2 diabetes, Jongs et al. Lancet Diabetes Endocrinol 2021)
+    list("addon_glp1",          0,    "rnorm",      0,         0,                           0,    0,    0, 0),
+    list("addon_glp1_uacr",     100,  "rnorm",      100,       0,                           100,  100,  0, 0),
+    list("sglt2i_uacr_reduction", 0.351, "rnorm",   0.351,     0,                           0.351, 0.351, 0, 0),
+    # 1 = GLP-1 RA effects from FLOW in patients with type 2 diabetes (class effects
+    # without diabetes): MACE 0.82, HF events 0.73, CV death 0.71 (Perkovic 2024;
+    # Pratley 2024); total eGFR slope ratio 2.19/3.36 = 0.65
+    list("glp1_flow_dm",        0,    "rnorm",      0,         0,                           0,    0,    0, 0),
+    list("hr_flow_mace",        0.82, "rnorm",      0.82,      0,                           0.82, 0.82, 0, 0),
+    list("hr_flow_hf",          0.73, "rnorm",      0.73,      0,                           0.73, 0.73, 0, 0),
+    list("hr_flow_cv_death",    0.71, "rnorm",      0.71,      0,                           0.71, 0.71, 0, 0),
+    list("flow_egfr_slope_ratio", 0.65, "rnorm",    0.65,      0,                           0.65, 0.65, 0, 0),
+    # Kidney failure = eGFR < 15 (CV mortality multiplier, kidney failure count).
+    # Dialysis (cost, utility, drug stops) starts at dialysis_egfr; 10 = mean eGFR at
+    # dialysis start in the US (9.9 mL/min/1.73 m2, USRDS 2023 ADR, 2021 data).
+    # Before dialysis, kidney failure costs the CKD 4 amount
+    list("dialysis_egfr",       15,   "rnorm",      15,        0,                           15,   15,   0, 0),
+    # 1 = age-dependent decision not to start dialysis (p_forgo_dialysis(); Wong et
+    # al. CJASN 2016); conservative care costs the CKD 4 amount, drugs continue
+    list("dialysis_forgo",      0,    "rnorm",      0,         0,                           0,    0,    0, 0),
     # Multiplier on background mortality: 1 = noncardiovascular Gompertz hazard plus
     # a CV death hazard of 0.3/0.7 of it; 0.7 = the Gompertz hazard read as all-cause
     # mortality and split 70% noncardiovascular / 30% cardiovascular
@@ -184,6 +231,9 @@ build_param_lists <- function() {
     # 1 = standard of care optimized at entry: SBP lowered to <=130 mm Hg on
     # antihypertensives and every patient on a statin (total cholesterol -25% if new)
     list("soc_optimized",       0,    "rnorm",      0,         0,                           0,    0,    0, 0),
+    # PREVENT model for MI, stroke and HF hazards: 1 = full model (UACR, HbA1c; SDI
+    # missing), 0 = HbA1c model
+    list("prevent_full",        1,    "rnorm",      1,         0,                           1,    1,    0, 0),
     # Correlation between the PSA draws of log HRs for MACE, HF hospitalization, and
     # CV death within each class (applied only in the PSA)
     list("psa_hr_rho",          0.5,  "rnorm",      0.5,       0,                           0.5,  0.5,  0, 0)
@@ -307,6 +357,11 @@ build_drug_specific_params <- function(sglt2i_drug = "empagliflozin",
         params$b[[k]] <- (log(hi) - log(lo)) / 3.92
       }
     }
+  }
+  # The Ozempic/Wegovy price ratio applies to semaglutide only
+  if (glp1_drug != "semaglutide") {
+    k <- match("glp1_dm_price_ratio", pnames)
+    params$base_value[[k]] <- 1; params$a[[k]] <- 1; params$DSA_min[[k]] <- 1; params$DSA_max[[k]] <- 1
   }
   attr(params, "scenario") <- paste(sglt2i_drug, "vs", glp1_drug)
   params

@@ -61,7 +61,7 @@ N_PSA_CHUNKS <- 10  # production: 10 x 50 = 500 PSA iterations
 # (seed * n_sim * 1007 + seed * npats * 349 < 2^31).
 PSA_CHUNK_SEEDS <- c(101, 103, 107, 109, 113, 127, 131, 137, 139, 149)
 
-N_DSA_SHARDS <- 26  # one-way DSA parameters (50) split across this many R processes
+N_DSA_SHARDS <- 26  # one-way DSA parameters (53) split across this many R processes
 # dsa_patients must equal base_patients: the tornado is centred on the base case.
 
 SEED <- 42          # deterministic analyses; keep < 100 (WARDEN integer seed constraint)

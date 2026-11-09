@@ -1,9 +1,9 @@
 # AGENTS.md — CKM-HEOR Project
 
 > **Project**: Health Economic Model for Cardiovascular-Kidney-Metabolic (CKM) Syndrome  
-> **Status**: Revision after external pre-submission review (Oct 2026). Phase 1 (model code) done; Stage 3 production rerun complete (15 Oct 2026; results in `outputs/`, figures in `manuscript/figures/`). Manuscript Phases 2–4 done 15 Oct 2026; agent inputs corrected and agent runs rerun 16 Oct (D-033). Deliverables in `manuscript/revised/`, log and open items in `manuscript/NOTES.md`; only author items (title page, contributions, COI) remain.  
+> **Status**: R3 revision after the third pre-submission review (Nov 2026; plan `manuscript/R3_PLAN.md`). R3 code (PREVENT full model, kidney recalibration, sourced 2025 costs, GLP-1 RA price by diabetes, 26 scenarios) done and piloted locally; R3 production run pending. R2 results in `outputs/` (run 39934023863). R3 deliverables go to `manuscript/revised/R3/` (tracked Word files, author "Author"; response table in markdown); log in `manuscript/NOTES.md`.  
 > **Engine**: WARDEN DES v2.0.6 (R package)  
-> **Last Updated**: 2026-10-23 (R2: second pre-submission review; branch r2-revision; plan in manuscript/R2_PLAN.md)
+> **Last Updated**: 2026-11-09 (R3: third pre-submission review; branch r3-revision; decisions D-037 to D-041)
 
 ---
 
@@ -109,8 +109,9 @@ All scripts take an optional CKM stage argument and read sizes from `CKM_MODE` (
 | Run | pilot | production |
 |:--|:--|:--|
 | Base case (`run_base_case.R 3`; keeps patient-level output) | 500 pts | 20,000 pts |
-| Scenarios (`run_scenarios.R 3 structural|agents [part n_parts]`: 20 structural + 4 agent runs) | 200 pts | 20,000 pts |
-| DSA (`run_dsa.R 3 [shard 26]`: 50 parameters, 26 shards) | 500 pts | 20,000 pts (= base case) |
+| Scenarios (`run_scenarios.R 3 structural|agents [part n_parts]`: 26 structural in 14 parts + 4 agent runs) | 200 pts | 20,000 pts |
+| DSA (`run_dsa.R 3 [shard 26]`: 53 parameters, 26 shards) | 500 pts | 20,000 pts (= base case) |
+| Kidney calibration (`scripts/calibrate_kidney.R [--write]`, `scripts/kidney_slope_check.R [--write]`; analytic) | — | — |
 | Price scenarios (`scripts/price_scenarios.R`, post-processing) | — | exact from the base case |
 | PSA (`run_psa.R 3 [chunk]`: 10 chunks, seeds 101–149) | 10 × 2 sims × 100 pts | 10 × 50 sims × 1,000 pts = 500 iterations |
 
@@ -122,7 +123,7 @@ Rscript analysis/validate_minimal.R
 
 ### Production run — GitHub Actions (chosen approach)
 Step-by-step instructions: `docs/GITHUB_ACTIONS_GUIDE.md`. Workflow `.github/workflows/ckm-run.yml` (manual trigger, input `mode`; Stage 3 only): tests → base case (alone; ~5 GB) + 2 scenario jobs + 6 DSA jobs + 5 PSA jobs, two R processes per job (`ci/run_parallel.sh`) → combine → artifact `ckm-results-<mode>` and results on the run's Summary page. Always run `mode=pilot` first. Private-repo runners: 2 vCPU / 7 GB, 6 h job limit, 20 concurrent jobs, 2,000 free minutes per month (production ≈ 1,150). After downloading: `Rscript scripts/generate_manuscript_figures.R` and `Rscript scripts/make_parameter_table.R`.
-DSA jobs that hit the 5.5 h limit on a slow runner: rerun only those shards with `task=dsa-shards` (one parameter per R process; reuses the earlier run's `ckm-results-<mode>` artifact; see the guide). Production run 38523665536 (14 Oct 2026) finished everything except DSA shards 7+8 (time limit); those 8 parameters were run on the laptop on 15 Oct (`run_dsa.R 3 <7|8> 12 <part> 4`, identical patients and seeds) and combined with the run's `ckm-results-production` artifact. Earlier outputs are in `outputs_archive_20261015/`.
+DSA jobs that hit the 5.5 h limit on a slow runner: rerun only those shards with `task=dsa-shards` (one parameter per R process; reuses the earlier run's `ckm-results-<mode>` artifact; see the guide). Production run 38523665536 (14 Oct 2026) finished everything except DSA shards 7+8 (time limit); those 8 parameters were run on the laptop on 15 Oct (`run_dsa.R 3 <7|8> 12 <part> 4`, identical patients and seeds) and combined with the run's `ckm-results-production` artifact. Earlier outputs are in `outputs_archive_20261015/`. R2 production run 39934023863 (23 Oct 2026, public repo) finished every job, including all 26 DSA shards; previous outputs are in `outputs_archive_20261023/`.
 
 ### Production run — locally (alternative)
 ```bash
@@ -151,7 +152,14 @@ Single core throughout: ~0.02 s per patient per simulation on the M2 (~30 h tota
 - Results: pairwise increments with CE-plane quadrant labels, INMB, tornado, CE plane, CEAC
 - Validation: 12 end-to-end checks + helper unit checks
 
-### 🔄 Phase 8 — R2 after second pre-submission review (2026-10-23; code done, production rerun pending)
+### ✅ Phase 9 — R3 after third pre-submission review (2026-11-09; code done, production run pending)
+1. **PREVENT full model** (UACR + HbA1c, SDI missing) in the base case, matching preventr; HbA1c model as a scenario (D-037).
+2. **Kidney decline recalibrated** to KFRE by eGFR band and DAPA-CKD/FLOW placebo slopes at the trials' baseline eGFR/UACR; decline ×1.25 below eGFR 30 (D-038).
+3. **Costs re-sourced** (HCUP 2022, Ward 2014, Tisdale/Erickson by CKD stage 3a/3b/4, USRDS hemodialysis, MEPS 2022) and inflated to 2025 USD with the PCE health index (D-039).
+4. **GLP-1 RA commercial price by diabetes** (Ozempic-adjusted with T2D); repricing at patient level; generic-dapagliflozin and symmetric-net price scenarios (D-040).
+5. **26 structural scenarios**: two-way add-on, stop both at dialysis, dialysis at eGFR 10, age-dependent dialysis decision, FLOW in T2D only, trial-slope-matched kidney effects, R2 kidney calibration, PREVENT HbA1c model (D-041). 10-year CV death output.
+
+### ✅ Phase 8 — R2 after second pre-submission review (2026-10-23; code done, production rerun 39934023863 complete)
 1. **Prices by payer and age** (commercial before 65, Medicare from 65), exact price scenarios and thresholds by payer, two-way price chart (D-034).
 2. **SGLT2i stopped at kidney failure**; 20 structural scenarios incl. add-on SGLT2i (sequencing), background mortality, FLOW-based GLP-1 RA effects, real-world discontinuation, combined conservative (D-035).
 3. **PSA** widened (kidney heterogeneity, UACR exponent, correlated class HRs); DSA 50 parameters in 26 shards.
@@ -191,7 +199,7 @@ Single core throughout: ~0.02 s per patient per simulation on the M2 (~30 h tota
 
 ### ⚠️ Known Limitations (Remaining)
 1. **Monte Carlo error**: at 500 patients the SE of the Stage 3 SGLT2i vs SoC ICER is ~$7K (INMB ~$2.4K); PSA at 500 patients per iteration somewhat overstates parameter uncertainty. Stage 2 SGLT2i vs SoC (pilot INMB ~+$4K) is the least robust conclusion.
-2. **Kidney calibration by eGFR band**: under-predicts kidney failure at eGFR 20–30 and over-predicts at 45–60 (single decline rate across stages).
+2. **Kidney calibration by eGFR band**: 5-year kidney failure at eGFR 45–59 over-predicted (+75% vs KFRE); KFRE bands and trial placebo slopes cannot both be matched (D-038).
 3. **Mortality**: non-CV Gompertz hazard exceeds US all-cause mortality at age 62 (~1.9% vs ~1.5% men); implicitly includes excess CKM mortality but is not calibrated to a CKM-specific target.
 4. **PREVENT 10-year → annual hazard**: the constant-hazard conversion assigns the 10-year average hazard to the current age (slight upward bias, partly offset by yearly updates).
 5. **Structural assumptions without direct sources**: recurrence multipliers, CV mortality multipliers, biomarker drift — parameterised with wide DSA/PSA ranges.

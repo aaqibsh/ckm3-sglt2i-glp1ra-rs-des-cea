@@ -6,10 +6,10 @@ Individual-level discrete event simulation of US adults with cardiovascular-kidn
 
 - Engine: the WARDEN discrete event simulation package for R (version 2.0.6).
 - Events: myocardial infarction, stroke and heart failure hospitalization (recurrent), CKD progression and kidney failure, cardiovascular and noncardiovascular death, treatment discontinuation.
-- Event risks: PREVENT 10-year equations (with HbA1c), implemented from the published coefficients and checked against the `preventr` package (relative difference below 1e-10).
-- Kidney function: a linear eGFR trajectory per patient, scaled by albuminuria and calibrated to the Kidney Failure Risk Equation; treatment effects act as ratios on the rate of decline.
+- Event risks: PREVENT 10-year equations (full model with UACR and HbA1c; HbA1c model as a scenario), implemented from the published coefficients and checked against the `preventr` package (relative difference below 1e-9).
+- Kidney function: a piecewise-linear eGFR trajectory per patient, scaled by albuminuria, calibrated to the Kidney Failure Risk Equation by eGFR band and to trial placebo eGFR slopes (`scripts/calibrate_kidney.R`); treatment effects act as ratios on the rate of decline.
 - Treatment effects: class-level meta-analyses of outcome trials; drug prices by payer (commercial before age 65, Medicare negotiated prices from 65).
-- Uncertainty: one-way sensitivity analysis over 50 parameters, probabilistic sensitivity analysis (500 iterations × 1,000 patients), structural and price scenarios, subgroups.
+- Uncertainty: one-way sensitivity analysis over 53 parameters, probabilistic sensitivity analysis (500 iterations × 1,000 patients), structural and price scenarios, subgroups.
 
 Full specification: `docs/MODEL_SPECIFICATION.md`. Every input with its distribution, range and source: `docs/PARAMETER_SOURCES.md` (generated from the code). Design decisions and their rationale: `docs/DECISION_LOG.md`.
 
@@ -19,7 +19,7 @@ Full specification: `docs/MODEL_SPECIFICATION.md`. Every input with its distribu
 |:--|:--|
 | `R/` | Model: parameters, population, risk equations, treatment helpers, events, reactions, costs and utilities, orchestration, results, validation, patient-level outputs |
 | `analysis/` | Run scripts: base case, scenarios, one-way DSA, PSA, combining results, validation checks |
-| `scripts/` | Post-processing: price scenarios and thresholds, manuscript tables and figures, parameter table |
+| `scripts/` | Post-processing: price scenarios and thresholds, manuscript tables and figures, parameter table, kidney calibration and slope checks |
 | `tests/` | Unit checks of helper functions |
 | `.github/`, `ci/` | GitHub Actions workflow that runs the full analysis in the cloud |
 

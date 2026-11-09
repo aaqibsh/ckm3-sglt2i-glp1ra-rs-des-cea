@@ -3,7 +3,7 @@
 # Purpose: PREVENT risk equations (Khan et al. Circulation 2024), CV and non-CV
 #          mortality, and CKD staging helpers
 # Author: CKM-HEOR Team
-# Date: 2026-09-28 (revised — CHD/stroke split, validated-range clamping)
+# Date: 2026-11-09 (revised — PREVENT full model with UACR)
 # =============================================================================
 # Coefficients are the published 10-year PREVENT coefficients, verified to be
 # identical to the preventr CRAN package tables (see validate_prevent_equations()
@@ -141,6 +141,83 @@ PREVENT_COEF <- list(
       age_non_hdl = 0.0141928, age_hdl = -0.0111745, age_sbp_gte_110 = -0.1155391, age_dm = -0.2123743, age_smoking = -0.0824133,
       age_bmi_gte_30 = 0.0000000, age_egfr_lt_60 = -0.1807890, intercept = -4.2088100
     )
+  ),
+  # Full model (UACR, HbA1c and social deprivation index; preventr full_10yr).
+  # SDI is not available for simulated patients and enters as missing, as in
+  # preventr when no ZIP code is given.
+  full = list(
+    female_ascvd = c(
+      age = 0.7023067, non_hdl = 0.0898765, hdl = -0.1407316, sbp_lt_110 = -0.0256648, sbp_gte_110 = 0.3145110,
+      dm = 0.4799217, smoking = 0.4062049, bmi_lt_30 = 0.0000000, bmi_gte_30 = 0.0000000, egfr_lt_60 = 0.3847744,
+      egfr_gte_60 = 0.0495174, bp_tx = 0.2133861, statin = -0.0678552, bp_tx_sbp_gte_110 = -0.0451416, statin_non_hdl = 0.0788187,
+      age_non_hdl = -0.0535985, age_hdl = 0.0291762, age_sbp_gte_110 = -0.0961839, age_dm = -0.2001466, age_smoking = -0.0586472,
+      age_bmi_gte_30 = 0.0000000, age_egfr_lt_60 = -0.1537791, sdi_4_6 = 0.1413965, sdi_7_10 = 0.2281360, sdi_missing = 0.1588908,
+      ln_uacr = 0.1371824, uacr_missing = 0.0061613, hba1c_dm = 0.1231920, hba1c_nodm = 0.1410572, hba1c_missing = 0.0058660,
+      intercept = -4.2915030
+    ),
+    male_ascvd = c(
+      age = 0.7128741, non_hdl = 0.1465201, hdl = -0.1125794, sbp_lt_110 = -0.3387216, sbp_gte_110 = 0.2980252,
+      dm = 0.3995830, smoking = 0.3379111, bmi_lt_30 = 0.0000000, bmi_gte_30 = 0.0000000, egfr_lt_60 = 0.2582604,
+      egfr_gte_60 = 0.0147769, bp_tx = 0.1686621, statin = -0.1073619, bp_tx_sbp_gte_110 = -0.0381038, statin_non_hdl = 0.1034169,
+      age_non_hdl = -0.0228755, age_hdl = 0.0267453, age_sbp_gte_110 = -0.0897449, age_dm = -0.1497464, age_smoking = -0.0772060,
+      age_bmi_gte_30 = 0.0000000, age_egfr_lt_60 = -0.1198368, sdi_4_6 = 0.0651121, sdi_7_10 = 0.2676683, sdi_missing = 0.1388492,
+      ln_uacr = 0.1375837, uacr_missing = 0.0652944, hba1c_dm = 0.1012820, hba1c_nodm = 0.1092726, hba1c_missing = -0.0112852,
+      intercept = -3.9697880
+    ),
+    female_hf = c(
+      age = 0.8842090, non_hdl = 0.0000000, hdl = 0.0000000, sbp_lt_110 = -0.4214740, sbp_gte_110 = 0.3002919,
+      dm = 0.6170359, smoking = 0.5380269, bmi_lt_30 = -0.0191335, bmi_gte_30 = 0.2764302, egfr_lt_60 = 0.5975847,
+      egfr_gte_60 = 0.0654197, bp_tx = 0.3313614, statin = 0.0000000, bp_tx_sbp_gte_110 = -0.1002304, statin_non_hdl = 0.0000000,
+      age_non_hdl = 0.0000000, age_hdl = 0.0000000, age_sbp_gte_110 = -0.0845363, age_dm = -0.2989062, age_smoking = -0.1111354,
+      age_bmi_gte_30 = 0.0008104, age_egfr_lt_60 = -0.1666635, sdi_4_6 = 0.1213034, sdi_7_10 = 0.2314147, sdi_missing = 0.1819138,
+      ln_uacr = 0.1948135, uacr_missing = 0.0395368, hba1c_dm = 0.1766680, hba1c_nodm = 0.1614911, hba1c_missing = -0.0010583,
+      intercept = -4.8965240
+    ),
+    male_hf = c(
+      age = 0.9095703, non_hdl = 0.0000000, hdl = 0.0000000, sbp_lt_110 = -0.6765184, sbp_gte_110 = 0.3111651,
+      dm = 0.5535052, smoking = 0.4326811, bmi_lt_30 = -0.0854286, bmi_gte_30 = 0.3551736, egfr_lt_60 = 0.5102245,
+      egfr_gte_60 = 0.0154720, bp_tx = 0.2570964, statin = 0.0000000, bp_tx_sbp_gte_110 = -0.0591177, statin_non_hdl = 0.0000000,
+      age_non_hdl = 0.0000000, age_hdl = 0.0000000, age_sbp_gte_110 = -0.1219056, age_dm = -0.2437577, age_smoking = -0.1053630,
+      age_bmi_gte_30 = 0.0037907, age_egfr_lt_60 = -0.1660207, sdi_4_6 = 0.1106372, sdi_7_10 = 0.3371204, sdi_missing = 0.1694628,
+      ln_uacr = 0.2164607, uacr_missing = 0.1702805, hba1c_dm = 0.1482970, hba1c_nodm = 0.1234088, hba1c_missing = -0.0234637,
+      intercept = -4.6635130
+    ),
+    female_chd = c(
+      age = 0.7544208, non_hdl = 0.1403589, hdl = -0.1954699, sbp_lt_110 = -0.0021814, sbp_gte_110 = 0.3127753,
+      dm = 0.5230750, smoking = 0.4594228, bmi_lt_30 = 0.0000000, bmi_gte_30 = 0.0000000, egfr_lt_60 = 0.4173237,
+      egfr_gte_60 = 0.0385169, bp_tx = 0.1981640, statin = -0.0557405, bp_tx_sbp_gte_110 = -0.0940465, statin_non_hdl = 0.0844888,
+      age_non_hdl = -0.0630114, age_hdl = 0.0473455, age_sbp_gte_110 = -0.0801956, age_dm = -0.2002523, age_smoking = -0.0484742,
+      age_bmi_gte_30 = 0.0000000, age_egfr_lt_60 = -0.1455343, sdi_4_6 = 0.1651771, sdi_7_10 = 0.2276000, sdi_missing = 0.1602508,
+      ln_uacr = 0.1406282, uacr_missing = 0.0323720, hba1c_dm = 0.1656628, hba1c_nodm = 0.1586376, hba1c_missing = 0.0266703,
+      intercept = -5.1315050
+    ),
+    female_stroke = c(
+      age = 0.6848394, non_hdl = 0.0327248, hdl = -0.0957615, sbp_lt_110 = -0.0747400, sbp_gte_110 = 0.3237856,
+      dm = 0.4441471, smoking = 0.3636951, bmi_lt_30 = 0.0000000, bmi_gte_30 = 0.0000000, egfr_lt_60 = 0.3629529,
+      egfr_gte_60 = 0.0603154, bp_tx = 0.2253420, statin = -0.0885632, bp_tx_sbp_gte_110 = -0.0161592, statin_non_hdl = 0.0727068,
+      age_non_hdl = -0.0389022, age_hdl = 0.0141743, age_sbp_gte_110 = -0.1121459, age_dm = -0.2089706, age_smoking = -0.0703397,
+      age_bmi_gte_30 = 0.0000000, age_egfr_lt_60 = -0.1605001, sdi_4_6 = 0.1064527, sdi_7_10 = 0.2095741, sdi_missing = 0.1402740,
+      ln_uacr = 0.1285363, uacr_missing = -0.0243528, hba1c_dm = 0.0897340, hba1c_nodm = 0.1354790, hba1c_missing = -0.0158448,
+      intercept = -4.8008020
+    ),
+    male_chd = c(
+      age = 0.7335852, non_hdl = 0.2403104, hdl = -0.1822238, sbp_lt_110 = -0.4148860, sbp_gte_110 = 0.2880084,
+      dm = 0.4937277, smoking = 0.3326075, bmi_lt_30 = 0.0000000, bmi_gte_30 = 0.0000000, egfr_lt_60 = 0.2586836,
+      egfr_gte_60 = 0.0124978, bp_tx = 0.1132755, statin = -0.0823542, bp_tx_sbp_gte_110 = -0.0718794, statin_non_hdl = 0.0765924,
+      age_non_hdl = -0.0489011, age_hdl = 0.0531464, age_sbp_gte_110 = -0.0813293, age_dm = -0.1679294, age_smoking = -0.0927969,
+      age_bmi_gte_30 = 0.0000000, age_egfr_lt_60 = -0.0677064, sdi_4_6 = 0.0705264, sdi_7_10 = 0.2306082, sdi_missing = 0.0942060,
+      ln_uacr = 0.1354182, uacr_missing = 0.0759494, hba1c_dm = 0.1161950, hba1c_nodm = 0.0991112, hba1c_missing = 0.0213677,
+      intercept = -4.6298740
+    ),
+    male_stroke = c(
+      age = 0.7182761, non_hdl = 0.0008864, hdl = -0.0220683, sbp_lt_110 = -0.2719759, sbp_gte_110 = 0.3199570,
+      dm = 0.2728292, smoking = 0.3426763, bmi_lt_30 = 0.0000000, bmi_gte_30 = 0.0000000, egfr_lt_60 = 0.2907134,
+      egfr_gte_60 = 0.0186548, bp_tx = 0.2400360, statin = -0.1218938, bp_tx_sbp_gte_110 = 0.0042588, statin_non_hdl = 0.1412729,
+      age_non_hdl = 0.0275883, age_hdl = -0.0079987, age_sbp_gte_110 = -0.1121897, age_dm = -0.1446989, age_smoking = -0.0580327,
+      age_bmi_gte_30 = 0.0000000, age_egfr_lt_60 = -0.1820914, sdi_4_6 = 0.0797728, sdi_7_10 = 0.3204988, sdi_missing = 0.1892707,
+      ln_uacr = 0.1404936, uacr_missing = 0.0536898, hba1c_dm = 0.0868309, hba1c_nodm = 0.1187536, hba1c_missing = -0.0603180,
+      intercept = -4.6830480
+    )
   )
 )
 
@@ -154,7 +231,10 @@ PREVENT_RANGES <- list(
   hdl_chol   = c(20, 100),
   bmi        = c(18.5, 39.9),
   egfr       = c(15, 140),
-  hba1c      = c(4.5, 15)
+  hba1c      = c(4.5, 15),
+  # preventr accepts 0.1-25,000 mg/g; values below the assay limit (3 mg/g) are
+  # set to 3, as in the kidney trajectory (egfr_patient_multiplier())
+  uacr       = c(3, 25000)
 )
 
 clamp <- function(x, range) pmin(pmax(x, range[1]), range[2])
@@ -164,10 +244,12 @@ clamp <- function(x, range) pmin(pmax(x, range[1]), range[2])
 #'
 #' @param outcome One of "ascvd", "hf", "chd", "stroke"
 #' @param use_hba1c Logical; use the HbA1c-enhanced model when hba1c is supplied
+#' @param uacr Urine albumin-creatinine ratio (mg/g); used by the full model
+#' @param model "base", "hba1c" or "full"; NULL chooses from use_hba1c (base/hba1c)
 #' @return Annual hazard implied by a constant hazard over 10 years
-calculate_prevent_hazard <- function(age, sex, sbp, total_chol, hdl_chol, diabetes, smoking, egfr, statin_use, antihyp_use, bmi, hba1c, outcome, use_hba1c) {
-  use_hba1c_model <- use_hba1c && !is.null(hba1c)
-  model <- if (use_hba1c_model) "hba1c" else "base"
+calculate_prevent_hazard <- function(age, sex, sbp, total_chol, hdl_chol, diabetes, smoking, egfr, statin_use, antihyp_use, bmi, hba1c, outcome, use_hba1c, uacr = NULL, model = NULL) {
+  if (is.null(model)) model <- if (use_hba1c && !is.null(hba1c)) "hba1c" else "base"
+  use_hba1c_model <- model %in% c("hba1c", "full")
   b <- PREVENT_COEF[[model]][[paste0(if (sex == 1) "male_" else "female_", outcome)]]
   if (is.null(b)) stop("Unknown PREVENT outcome: ", outcome)
 
@@ -225,6 +307,13 @@ calculate_prevent_hazard <- function(age, sex, sbp, total_chol, hdl_chol, diabet
       b["hba1c_missing"] * hba1c_miss
   }
 
+  if (model == "full") {
+    # ln(UACR) uncentred, SDI missing (preventr prep_terms())
+    uacr_miss <- if (is.null(uacr) || is.na(uacr)) 1 else 0
+    ln_uacr   <- if (uacr_miss == 1) 0 else log(clamp(uacr, PREVENT_RANGES$uacr))
+    log_odds <- log_odds + b["ln_uacr"] * ln_uacr + b["uacr_missing"] * uacr_miss + b["sdi_missing"]
+  }
+
   p_10yr <- 1 / (1 + exp(-log_odds))
   lambda <- -log(1 - p_10yr) / 10
 
@@ -249,8 +338,8 @@ calculate_prevent_hazard <- function(age, sex, sbp, total_chol, hdl_chol, diabet
 #'
 #' @return Numeric, annual hazard rate
 #' @export
-calculate_annual_ascvd_hazard <- function(age, sex, sbp, total_chol, hdl_chol, diabetes, smoking, egfr, statin_use, antihyp_use, bmi = 25, hba1c = NULL, use_hba1c = TRUE) {
-  calculate_prevent_hazard(age, sex, sbp, total_chol, hdl_chol, diabetes, smoking, egfr, statin_use, antihyp_use, bmi, hba1c, "ascvd", use_hba1c)
+calculate_annual_ascvd_hazard <- function(age, sex, sbp, total_chol, hdl_chol, diabetes, smoking, egfr, statin_use, antihyp_use, bmi = 25, hba1c = NULL, use_hba1c = TRUE, uacr = NULL, model = NULL) {
+  calculate_prevent_hazard(age, sex, sbp, total_chol, hdl_chol, diabetes, smoking, egfr, statin_use, antihyp_use, bmi, hba1c, "ascvd", use_hba1c, uacr, model)
 }
 
 #' Calculate Annual Heart Failure Hazard (PREVENT)
@@ -258,8 +347,8 @@ calculate_annual_ascvd_hazard <- function(age, sex, sbp, total_chol, hdl_chol, d
 #' @inheritParams calculate_annual_ascvd_hazard
 #' @return Numeric, annual hazard rate
 #' @export
-calculate_annual_hf_hazard <- function(age, sex, bmi, sbp, egfr, hba1c, diabetes, smoking, antihyp_use = 0, total_chol = 200, hdl_chol = 50, statin_use = 0, use_hba1c = TRUE) {
-  calculate_prevent_hazard(age, sex, sbp, total_chol, hdl_chol, diabetes, smoking, egfr, statin_use, antihyp_use, bmi, hba1c, "hf", use_hba1c)
+calculate_annual_hf_hazard <- function(age, sex, bmi, sbp, egfr, hba1c, diabetes, smoking, antihyp_use = 0, total_chol = 200, hdl_chol = 50, statin_use = 0, use_hba1c = TRUE, uacr = NULL, model = NULL) {
+  calculate_prevent_hazard(age, sex, sbp, total_chol, hdl_chol, diabetes, smoking, egfr, statin_use, antihyp_use, bmi, hba1c, "hf", use_hba1c, uacr, model)
 }
 
 #' Share of ASCVD hazard attributable to MI (CHD) rather than stroke
@@ -269,9 +358,9 @@ calculate_annual_hf_hazard <- function(age, sex, bmi, sbp, egfr, hba1c, diabetes
 #'   they are used only as a patient-specific split of the ASCVD hazard.
 #' @inheritParams calculate_annual_ascvd_hazard
 #' @return Numeric in (0, 1)
-calculate_mi_share <- function(age, sex, sbp, total_chol, hdl_chol, diabetes, smoking, egfr, statin_use, antihyp_use, bmi = 25, hba1c = NULL, use_hba1c = TRUE) {
-  h_chd    <- calculate_prevent_hazard(age, sex, sbp, total_chol, hdl_chol, diabetes, smoking, egfr, statin_use, antihyp_use, bmi, hba1c, "chd", use_hba1c)
-  h_stroke <- calculate_prevent_hazard(age, sex, sbp, total_chol, hdl_chol, diabetes, smoking, egfr, statin_use, antihyp_use, bmi, hba1c, "stroke", use_hba1c)
+calculate_mi_share <- function(age, sex, sbp, total_chol, hdl_chol, diabetes, smoking, egfr, statin_use, antihyp_use, bmi = 25, hba1c = NULL, use_hba1c = TRUE, uacr = NULL, model = NULL) {
+  h_chd    <- calculate_prevent_hazard(age, sex, sbp, total_chol, hdl_chol, diabetes, smoking, egfr, statin_use, antihyp_use, bmi, hba1c, "chd", use_hba1c, uacr, model)
+  h_stroke <- calculate_prevent_hazard(age, sex, sbp, total_chol, hdl_chol, diabetes, smoking, egfr, statin_use, antihyp_use, bmi, hba1c, "stroke", use_hba1c, uacr, model)
   h_chd / (h_chd + h_stroke)
 }
 
@@ -346,17 +435,21 @@ calculate_annual_cv_mortality <- function(age, sex, prior_mi, prior_stroke, prio
 #' @param bg_mult Multiplier on background (CV) mortality (bg_mort_mult)
 #' @param age_cap Age used in the PREVENT equations is min(age, age_cap)
 #' @param hf_frac Share of PREVENT incident HF that is a hospitalization
+#' @param uacr Baseline UACR (mg/g), used by the full model
+#' @param prevent_full 1 = PREVENT full model (UACR + HbA1c), 0 = HbA1c model
 calculate_base_hazards <- function(age, sex, sbp, total_chol, hdl_chol, diabetes, smoking,
                                    egfr, statin_use, antihyp_use, bmi, hba1c,
                                    prior_mi, prior_stroke, prior_hf, ckd_stage, cvd_mult,
-                                   bg_mult = 1, age_cap = Inf, hf_frac = 1) {
+                                   bg_mult = 1, age_cap = Inf, hf_frac = 1,
+                                   uacr = NULL, prevent_full = 0) {
   age_p <- min(age, age_cap)
+  mdl <- if (prevent_full == 1) "full" else "hba1c"
   h_ascvd <- calculate_annual_ascvd_hazard(age_p, sex, sbp, total_chol, hdl_chol, diabetes, smoking,
-                                           egfr, statin_use, antihyp_use, bmi, hba1c)
+                                           egfr, statin_use, antihyp_use, bmi, hba1c, uacr = uacr, model = mdl)
   mi_share <- calculate_mi_share(age_p, sex, sbp, total_chol, hdl_chol, diabetes, smoking,
-                                 egfr, statin_use, antihyp_use, bmi, hba1c)
+                                 egfr, statin_use, antihyp_use, bmi, hba1c, uacr = uacr, model = mdl)
   h_hf <- calculate_annual_hf_hazard(age_p, sex, bmi, sbp, egfr, hba1c, diabetes, smoking,
-                                     antihyp_use, total_chol, hdl_chol, statin_use)
+                                     antihyp_use, total_chol, hdl_chol, statin_use, uacr = uacr, model = mdl)
   h_cvd <- calculate_annual_cv_mortality(age, sex, prior_mi, prior_stroke, prior_hf, ckd_stage,
                                          cvd_mult[["mi"]], cvd_mult[["stroke"]], cvd_mult[["hf"]],
                                          cvd_mult[["ckd3"]], cvd_mult[["ckd4"]], cvd_mult[["eskd"]],

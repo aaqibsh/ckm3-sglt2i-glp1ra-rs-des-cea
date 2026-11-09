@@ -2,7 +2,7 @@
 # File: 06_reactions.R
 # Purpose: WARDEN event reaction logic — defines evt_react_list
 # Author: CKM-HEOR Team
-# Date: 2026-10-14 (revised — drug cost in its own accumulator, horizon event)
+# Date: 2026-11-09 (revised — kidney state helpers, dialysis start, two-way add-on)
 # =============================================================================
 # Every change to the patient's state (ageing, biomarker drift, eGFR decline,
 # prior events, CKD stage, treatment effect) goes through two helpers:
@@ -32,7 +32,7 @@ refresh_hazards <- function(e, redraw = character(0)) {
     e$pt_age, e$pt_sex, e$cur_sbp, e$pt_tc, e$pt_hdl, e$pt_dm, e$pt_smk,
     e$egfr_cur, e$pt_statin, e$pt_antihyp, e$pt_bmi, e$cur_hba1c,
     e$fl_prior_mi, e$fl_prior_stroke, e$fl_prior_hf, e$ckd_stage, e$cvd_mult,
-    e$bg_mort_mult, e$prevent_age_cap, e$hf_hosp_frac
+    e$bg_mort_mult, e$prevent_age_cap, e$hf_hosp_frac, e$pt_uacr, get("prevent_full", envir = e)
   )
   h_new <- total_event_hazards(h_base, e$rr_state, e$hr_mace_arm, e$hr_hf_arm,
                                e$hr_cvd_arm, e$tx_eff, e$addon_mult)
@@ -48,45 +48,121 @@ refresh_hazards <- function(e, redraw = character(0)) {
   invisible(h_new)
 }
 
-#' Re-anchor the eGFR trajectory and reschedule the next CKD progression
+#' Re-anchor the eGFR trajectory and reschedule kidney events
 #'
+#' @description Reschedules ckd_prog (next stage boundary), egfr45 (stage 3b cost)
+#'   and, after kidney failure, dialysis (when dialysis starts below eGFR 15).
 #' @param e The patient-arm environment WARDEN evaluates reactions in
 refresh_kidney <- function(e) {
+  g <- function(x) get(x, envir = e)   # parameters may live in a parent environment
   e$egfr_cur   <- egfr_at(e$curtime, e$egfr_ref, e$t_egfr_ref, e$egfr_slope)
   e$egfr_ref   <- e$egfr_cur
   e$t_egfr_ref <- e$curtime
   e$egfr_slope <- e$egfr_decline_ref * e$egfr_pt_mult *
-    hr_effective(e$egfr_slope_ratio_arm, e$tx_eff) * e$addon_slope
+    hr_effective(e$egfr_slope_ratio_arm, e$tx_eff) * e$addon_slope *
+    kidney_band_multiplier(g("ckd_stage"), g("fl_ckd3b"), g("egfr_mult_3b"), g("egfr_mult_4"))
   t_next <- time_to_next_ckd_stage(e$egfr_cur, e$egfr_slope, e$ckd_stage)
-  modify_event(c(ckd_prog = e$curtime + t_next), ptr = e$cur_evtlist, patient_id = e$i)
+  t_45   <- if (g("fl_ckd3b") == 0) time_to_egfr(e$egfr_cur, e$egfr_slope, 45) else Inf
+  t_dial <- if (g("ckd_stage") >= 5 && g("fl_dialysis") == 0 && g("fl_conservative") == 0)
+    time_to_egfr(e$egfr_cur, e$egfr_slope, g("dialysis_egfr")) else Inf
+  modify_event(c(ckd_prog = e$curtime + t_next, egfr45 = e$curtime + t_45, dialysis = e$curtime + t_dial),
+               ptr = e$cur_evtlist, patient_id = e$i)
 }
 
-#' Start an add-on SGLT2i in the SoC or GLP-1 RA arm (addon_sglt2i scenario)
+#' Move to a new kidney state, replacing its annual cost and utility decrement
 #'
-#' @description Guideline class 1 triggers: first HF hospitalization or CKD stage 4.
-#'   The add-on's effects multiply those of the arm's own drug; its cost follows
-#'   the current payer; it stops at a constant SGLT2i discontinuation rate (effect
-#'   lost at once) or at kidney failure. Callers refresh kidney and hazards.
 #' @param e The patient-arm environment
-maybe_start_addon <- function(e) {
-  g <- function(x) get(x, envir = e)   # parameters may live in a parent environment
-  if (g("addon_sglt2i") != 1 || g("arm") == "sglt2i" || g("addon_on") == 1 || g("ckd_stage") >= 5) {
+#' @param stage,sub3b,dialysis New CKD stage, stage 3b flag, and dialysis flag
+set_kidney_state <- function(e, stage, sub3b, dialysis) {
+  g <- function(x) get(x, envir = e)
+  cost <- function(st, sb, dl) ckd_state_cost(st, sb, dl, g("cost_ckd3a_annual"), g("cost_ckd3b_annual"),
+                                              g("cost_ckd4_annual"), g("cost_eskd_annual"))
+  dec <- function(st, dl) ckd_state_disutility(st, dl, g("util_dec_ckd3"), g("util_dec_ckd4"), g("util_dec_eskd"))
+  e$c_default <- g("c_default") + cost(stage, sub3b, dialysis) - cost(g("ckd_stage"), g("fl_ckd3b"), g("fl_dialysis"))
+  e$q_default <- g("q_default") - (dec(stage, dialysis) - dec(g("ckd_stage"), g("fl_dialysis")))
+  e$ckd_stage   <- stage
+  e$fl_ckd3b    <- sub3b
+  e$fl_dialysis <- dialysis
+}
+
+#' Stop the arm's own drug at once (no waning), e.g. at dialysis start
+stop_arm_drug <- function(e) {
+  g <- function(x) get(x, envir = e)
+  if (g("tx_eff") <= 0) return(invisible(FALSE))
+  if (g("fl_on_treatment") == 1) e$q_default <- g("q_default") - g("util_gain_arm")
+  e$fl_on_treatment <- 0
+  e$c_drug_com <- 0
+  e$c_drug_mcr <- 0
+  e$tx_eff <- 0
+  modify_event(c(tx_discont = Inf, tx_wane = Inf), ptr = g("cur_evtlist"), patient_id = g("i"))
+  invisible(TRUE)
+}
+
+#' Start kidney replacement at kidney failure (eGFR 15, or dialysis_egfr)
+#'
+#' @description Dialysis replaces the CKD 4 cost and adds the dialysis decrement;
+#'   SGLT2i (and GLP-1 RA if stop_glp1_at_kf) stop. In the dialysis_forgo scenario
+#'   patients decide against dialysis with probability p_forgo_dialysis(age):
+#'   conservative care keeps the CKD 4 cost and decrement, and drugs continue.
+#' @param e The patient-arm environment. Callers refresh kidney and hazards.
+start_kidney_replacement <- function(e) {
+  g <- function(x) get(x, envir = e)
+  age_now <- g("pt_age_baseline") + g("curtime")
+  if (g("dialysis_forgo") == 1 && g("u_dialysis") < p_forgo_dialysis(age_now)) {
+    e$fl_conservative <- 1
     return(invisible(FALSE))
   }
+  set_kidney_state(e, g("ckd_stage"), g("fl_ckd3b"), 1)
+  if ((g("arm") == "sglt2i" && g("stop_sglt2i_at_kf") == 1) ||
+      (g("arm") == "glp1ra" && g("stop_glp1_at_kf") == 1)) stop_arm_drug(e)
+  if (g("addon_on") == 1 && ((g("addon_type") == "sglt2i" && g("stop_sglt2i_at_kf") == 1) ||
+                             (g("addon_type") == "glp1" && g("stop_glp1_at_kf") == 1))) stop_addon(e)
+  invisible(TRUE)
+}
+
+#' Start an add-on drug (addon_sglt2i, addon_glp1 scenarios)
+#'
+#' @description SGLT2i in the SoC or GLP-1 RA arm at the first HF hospitalization
+#'   or CKD stage 4 (guideline class 1 indications). GLP-1 RA in the SGLT2i arm at
+#'   1 year in type 2 diabetes with persistent albuminuria on SGLT2i (baseline UACR
+#'   lowered by sglt2i_uacr_reduction still >= addon_glp1_uacr), while on SGLT2i and
+#'   not on dialysis. The add-on's effects multiply those of the arm's own drug; its
+#'   cost follows the current payer; it stops at its class discontinuation rate
+#'   (effect lost at once) or at dialysis start. Callers refresh kidney and hazards.
+#' @param e The patient-arm environment
+#' @param type "sglt2i" or "glp1"
+maybe_start_addon <- function(e, type = "sglt2i") {
+  g <- function(x) get(x, envir = e)   # parameters may live in a parent environment
+  if (g("addon_on") == 1) return(invisible(FALSE))
+  if (type == "sglt2i") {
+    if (g("addon_sglt2i") != 1 || g("arm") == "sglt2i" || g("ckd_stage") >= 5) return(invisible(FALSE))
+    hrs  <- c(g("hr_sglt2i_mace"), g("hr_sglt2i_hf"), g("hr_sglt2i_cv_death"), g("sglt2i_egfr_slope_ratio"))
+    pr   <- c(g("cost_sglt2i"), g("cost_sglt2i_mcr"))
+    rate <- g("rate_disc_sglt2i")
+  } else {
+    if (g("addon_glp1") != 1 || g("arm") != "sglt2i" || g("pt_dm") != 1 || g("fl_on_treatment") != 1 ||
+        g("fl_dialysis") == 1 ||
+        g("pt_uacr") * (1 - g("sglt2i_uacr_reduction")) < g("addon_glp1_uacr")) return(invisible(FALSE))
+    hrs  <- if (g("glp1_flow_dm") == 1) c(g("hr_flow_mace"), g("hr_flow_hf"), g("hr_flow_cv_death"), g("flow_egfr_slope_ratio")) else
+      c(g("hr_glp1_mace"), g("hr_glp1_hf"), g("hr_glp1_cv_death"), g("glp1_egfr_slope_ratio"))
+    pr   <- c(g("cost_glp1ra") * g("glp1_dm_price_ratio"), g("cost_glp1ra_mcr"))
+    rate <- g("rate_disc_glp1")
+  }
   e$addon_on    <- 1
-  e$addon_mult  <- addon_multipliers(1, g("hr_sglt2i_mace"), g("hr_sglt2i_hf"), g("hr_sglt2i_cv_death"))
+  e$addon_type  <- type
+  e$addon_mult  <- addon_multipliers(1, hrs[1], hrs[2], hrs[3])
   eligible      <- g("kidney_effect_restrict") == 0 || g("pt_uacr") >= 30 || g("pt_egfr") < 60
-  e$addon_slope <- if (eligible) g("sglt2i_egfr_slope_ratio") else 1
-  e$c_addon     <- if (g("fl_mcr") == 1) g("cost_sglt2i_mcr") else g("cost_sglt2i")
-  rate <- g("rate_disc_sglt2i")
+  e$addon_slope <- if (eligible) hrs[4] else 1
+  e$c_addon     <- if (g("fl_mcr") == 1) pr[2] else pr[1]
   t_stop <- if (rate > 0) g("curtime") + rexp(1, rate) else Inf
   modify_event(c(addon_discont = t_stop), ptr = g("cur_evtlist"), patient_id = g("i"))
   invisible(TRUE)
 }
 
-#' Stop an add-on SGLT2i (callers refresh kidney and hazards)
+#' Stop an add-on (callers refresh kidney and hazards)
 stop_addon <- function(e) {
   e$addon_on    <- 0
+  e$addon_type  <- "none"
   e$addon_mult  <- addon_multipliers(0, 1, 1, 1)
   e$addon_slope <- 1
   e$c_addon     <- 0
@@ -95,7 +171,7 @@ stop_addon <- function(e) {
 
 #' Build the event reaction list for WARDEN
 #'
-#' @description Defines reactions for all 13 events. Uses delayed execution —
+#' @description Defines reactions for all 15 events. Uses delayed execution —
 #'   all variables are resolved at WARDEN runtime, not at definition time.
 #' @return evt_react_list for WARDEN::run_sim()
 build_reactions <- function() {
@@ -187,7 +263,7 @@ build_reactions <- function() {
         rr_state[["hf_hosp"]] <- rr_recur_hf^n_hf
 
         # Add-on SGLT2i at the first HF hospitalization (scenario)
-        if (maybe_start_addon(environment())) refresh_kidney(environment())
+        if (maybe_start_addon(environment(), "sglt2i")) refresh_kidney(environment())
 
         if (n_hf < max_hf) {
           refresh_hazards(environment(), redraw = "hf_hosp")
@@ -207,38 +283,47 @@ build_reactions <- function() {
         egfr_ref   <- stage_lower_bound(ckd_stage)
         t_egfr_ref <- curtime
 
-        old_stage <- ckd_stage
-        ckd_stage <- next_ckd_stage(ckd_stage)
-
         # Replace the previous stage's management cost and decrement
-        c_default <- c_default +
-          ckd_state_cost(ckd_stage, cost_ckd3_annual, cost_ckd4_annual, cost_eskd_annual) -
-          ckd_state_cost(old_stage, cost_ckd3_annual, cost_ckd4_annual, cost_eskd_annual)
-        q_default <- q_default -
-          (ckd_state_disutility(ckd_stage, util_dec_ckd3, util_dec_ckd4, util_dec_eskd) -
-             ckd_state_disutility(old_stage, util_dec_ckd3, util_dec_ckd4, util_dec_eskd))
+        new_stage <- next_ckd_stage(ckd_stage)
+        set_kidney_state(environment(), new_stage, if (new_stage >= 4) 1 else fl_ckd3b, fl_dialysis)
 
         if (ckd_stage >= 5) fl_eskd <- 1
 
         # Add-on SGLT2i at CKD stage 4 (scenario)
-        if (ckd_stage == 4) maybe_start_addon(environment())
+        if (ckd_stage == 4) maybe_start_addon(environment(), "sglt2i")
 
-        # SGLT2i stopped at kidney failure (dialysis or transplant), no waning
-        if (ckd_stage >= 5 && stop_sglt2i_at_kf == 1) {
-          if (arm == "sglt2i" && tx_eff > 0) {
-            if (fl_on_treatment == 1) q_default <- q_default - util_gain_arm
-            fl_on_treatment <- 0
-            c_drug_com <- 0
-            c_drug_mcr <- 0
-            tx_eff <- 0
-            modify_event(c(tx_discont = Inf, tx_wane = Inf))
-          }
-          if (addon_on == 1) stop_addon(environment())
-        }
+        # Kidney failure: dialysis starts now unless it starts at a lower eGFR
+        # (dialysis_egfr scenario; refresh_kidney() then schedules it)
+        if (ckd_stage >= 5 && dialysis_egfr >= 15) start_kidney_replacement(environment())
 
-        # Reschedule to the next boundary; ESKD stops further progression
+        # Reschedule to the next boundary; kidney failure stops further progression
         refresh_kidney(environment())
         # CKD stage changes CV mortality and PREVENT eGFR terms
+        refresh_hazards(environment())
+      }
+    )
+
+  # ---- eGFR falls below 45: stage 3b cost and decline rate ----
+  evt_react_list <- evt_react_list |>
+    add_reactevt(
+      name_evt = "egfr45",
+      input = {
+        egfr_ref   <- 45
+        t_egfr_ref <- curtime
+        set_kidney_state(environment(), ckd_stage, 1, fl_dialysis)
+        refresh_kidney(environment())
+      }
+    )
+
+  # ---- Dialysis start below eGFR 15 (dialysis_egfr scenario) ----
+  evt_react_list <- evt_react_list |>
+    add_reactevt(
+      name_evt = "dialysis",
+      input = {
+        egfr_ref   <- dialysis_egfr
+        t_egfr_ref <- curtime
+        start_kidney_replacement(environment())
+        refresh_kidney(environment())
         refresh_hazards(environment())
       }
     )
@@ -336,11 +421,11 @@ build_reactions <- function() {
           c_drug_com <- 0
           c_drug_mcr <- price_mcr
         }
-        if (addon_on == 1) c_addon <- cost_sglt2i_mcr
+        if (addon_on == 1) c_addon <- if (addon_type == "glp1") cost_glp1ra_mcr else cost_sglt2i_mcr
       }
     )
 
-  # ---- Add-on SGLT2i discontinuation (scenario) ----
+  # ---- Add-on discontinuation (scenario) ----
   evt_react_list <- evt_react_list |>
     add_reactevt(
       name_evt = "addon_discont",
@@ -366,6 +451,9 @@ build_reactions <- function() {
 
         # Background cost rises by cost_bg_age_coef per year of age above 50
         c_default <- c_default + cost_bg_age_coef * min(1, max(0, pt_age - 50))
+
+        # Add-on GLP-1 RA in the SGLT2i arm at 1 year (scenario)
+        if (abs(curtime - 1) < 1e-9 && maybe_start_addon(environment(), "glp1")) refresh_kidney(environment())
 
         refresh_hazards(environment())
 

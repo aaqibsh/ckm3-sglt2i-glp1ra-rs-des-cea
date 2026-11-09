@@ -3,7 +3,7 @@
 # Purpose: Patient-level summaries from the base-case event log (ipd = 1):
 #          event burden, subgroups, external-validation checks
 # Author: CKM-HEOR Team
-# Date: 2026-10-14
+# Date: 2026-11-09 (revised — PREVENT full model, 10-year CV death, dialysis)
 # =============================================================================
 # The base case writes one row per patient and arm (patient_summary()); every
 # table below is computed from that file, so subgroup and validation tables can
@@ -17,11 +17,14 @@ library(data.table)
 #' @description Inputs are clamped to PREVENT's validated ranges (age 30-79,
 #'   SBP 90-180, total cholesterol 130-320, HDL 20-100, BMI 18.5-39.9,
 #'   eGFR 15-140) so every patient gets a prediction; the model's own hazards
-#'   use the same winsorisation (03_risk_equations.R). HbA1c model, as in the
-#'   simulation.
+#'   use the same winsorisation (03_risk_equations.R); UACR below 3 mg/g is set
+#'   to 3. Same PREVENT model as the simulation: full (UACR, HbA1c; SDI missing)
+#'   or HbA1c.
 #' @param pop Population from generate_ckm_population()
+#' @param model "full" or "hba1c"
 #' @return data.table: pat_id, prevent_total_cvd, prevent_ascvd, prevent_hf
-prevent_baseline_risk <- function(pop) {
+prevent_baseline_risk <- function(pop, model = if (l_params$base_value[[match("prevent_full",
+                                    unlist(l_params$parameter_name))]] == 1) "full" else "hba1c") {
   cl <- function(x, lo, hi) pmin(pmax(x, lo), hi)
   d <- data.frame(
     age = cl(pop$age, 30, 79), sex = ifelse(pop$sex == 1, "male", "female"),
@@ -29,8 +32,9 @@ prevent_baseline_risk <- function(pop) {
     total_c = cl(pop$total_chol, 130, 320), hdl_c = cl(pop$hdl_chol, 20, 100),
     statin = pop$statin_use == 1, dm = pop$diabetes == 1, smoking = pop$smoking == 1,
     egfr = cl(pop$egfr, 15, 140), bmi = cl(pop$bmi, 18.5, 39.9), hba1c = cl(pop$hba1c, 4.5, 15),
-    model = "hba1c", time = "10yr"
+    model = model, time = "10yr"
   )
+  if (model == "full") d$uacr <- cl(pop$uacr, 3, 25000)
   r <- preventr::estimate_risk(use_dat = d, progress = FALSE, quiet = TRUE)
   data.table(pat_id = pop$pat_id, prevent_total_cvd = r$total_cvd,
              prevent_ascvd = r$ascvd, prevent_hf = r$heart_failure)
@@ -68,6 +72,7 @@ patient_summary <- function(res, pop) {
     t_first_mi = first_t(evtname, evttime, "mi"), t_first_stroke = first_t(evtname, evttime, "stroke"),
     t_first_hf = first_t(evtname, evttime, "hf_hosp"),
     t_eskd = if (any(evtname == "ckd_prog" & ckd_stage == 5)) min(evttime[evtname == "ckd_prog" & ckd_stage == 5]) else NA_real_,
+    t_dialysis = if (any(fl_dialysis == 1)) min(evttime[fl_dialysis == 1]) else NA_real_,
     t_end = max(evttime),
     end_reason = evtname[which.max(evttime)]
   ), by = .(pat_id, arm)]
@@ -143,6 +148,8 @@ event_table <- function(ps) {
     hf_per_100py_5y = 100 * sum(n_hf_5y) / sum(pmin(t_end, 5)),
     cv_death_pct = 100 * mean(end_reason == "death_cv"),
     cv_death_per_100pts = 100 * mean(end_reason == "death_cv"),
+    cv_death_10y_pct = 100 * mean(end_reason == "death_cv" & t_end <= 10),
+    pct_dialysis = 100 * mean(!is.na(t_dialysis)),
     life_expectancy_undisc = mean(lys_undisc),
     qalys_undisc = mean(qalys_undisc),
     pct_at_cap_mi = 100 * mean(n_mi >= 3), pct_at_cap_stroke = 100 * mean(n_stroke >= 3),

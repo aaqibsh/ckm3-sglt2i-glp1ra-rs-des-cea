@@ -19,16 +19,26 @@
 #     and slower CKD progression)
 #   - Equal kidney effect; no kidney effect; kidney effect only with UACR >= 30 or
 #     eGFR < 60
-#   - Add-on SGLT2i at first HF hospitalization or CKD stage 4 in the SoC and GLP-1 RA arms
-#   - SGLT2i stopped at kidney failure switched off (continued for life)
+#   - Trial-slope-matched kidney effects: each class's slope ratio reproduces its
+#     trial's absolute total-slope difference (DAPA-CKD 0.95, FLOW 1.16) in a
+#     population with the trial's baseline eGFR and UACR (scripts/kidney_slope_check.R)
+#   - R2 kidney calibration (one decline rate: reference 0.65, SD log 1.5)
+#   - Add-on in both directions: SGLT2i at first HF hospitalization or CKD stage 4
+#     in the SoC and GLP-1 RA arms; GLP-1 RA at 1 year in the SGLT2i arm with type 2
+#     diabetes and persistent albuminuria (UACR >= 100 mg/g on SGLT2i)
+#   - SGLT2i continued after kidney failure; both classes stopped at dialysis start
+#   - Dialysis starting at eGFR 10 (USRDS mean eGFR at dialysis start 9.9); age-
+#     dependent decision not to start dialysis (Wong 2016), conservative care
 #   - Background mortality: Gompertz hazard read as all-cause, split 70/30 (major
 #     cardiovascular diseases I00-I78 caused 28.6% of US deaths in 2022, NVSR 74(4))
 #   - Half of incident HF hospitalized (52.8% of incident HF diagnosed in acute care,
 #     inpatient or emergency department; Tisdale 2023, Veterans Health Administration)
 #   - SGLT2i effects in patients without ASCVD (McGuire 2021 subgroup)
-#   - GLP-1 RA effects from FLOW (semaglutide, T2D and CKD) at semaglutide prices
+#   - GLP-1 RA effects from FLOW (semaglutide, T2D and CKD) in patients with type 2
+#     diabetes, class effects without diabetes
 #   - Weight-related utility gain on treatment
-#   - Optimized standard of care; PREVENT age capped at 79
+#   - Optimized standard of care; PREVENT age capped at 79; PREVENT HbA1c model
+#     (R2 base case) instead of the full model
 #   - Combined conservative scenario (assumptions against SGLT2i together)
 # Agent scenarios: the 8 agents (DRUG_SPECIFIC_INPUTS) in 4 runs. Arms are
 #   simulated independently with common random numbers, so each run gives two
@@ -60,17 +70,18 @@ n_parts <- if (length(args) >= 4) as.integer(args[4]) else 1L
 stopifnot(group %in% c("structural", "agents", "all"), part >= 1, part <= n_parts)
 n_pat <- RUN_SIZES$scen_patients
 
-# Chronic eGFR slope ratios (on-treatment / placebo chronic slope). Left NA until
-# the placebo chronic slopes are confirmed from the trial reports; the scenario
-# is skipped while any value is NA.
-CHRONIC_SLOPE_RATIOS <- c(sglt2i = NA_real_, glp1ra = NA_real_)
-
 pv <- function(nm) l_params$base_value[[match(nm, unlist(l_params$parameter_name))]]
 
-# GLP-1 RA effects from FLOW (Perkovic 2024; Pratley 2024): MACE 0.82 (0.68-0.98),
-# HF events 0.73 (0.58-0.92), CV death 0.71 (0.56-0.89); kidney: ratio of total eGFR
-# slopes, semaglutide vs placebo (about 0.65)
-flow <- list(hr_glp1_mace = 0.82, hr_glp1_hf = 0.73, hr_glp1_cv_death = 0.71, glp1_egfr_slope_ratio = 0.65)
+# Trial-slope-matched ratios: 1 - trial total-slope difference / model untreated
+# decline in a population with the trial's baseline eGFR and UACR (3.27 DAPA-CKD,
+# 2.73 FLOW; scripts/kidney_slope_check.R)
+matched <- list(sglt2i_egfr_slope_ratio = 0.709, glp1_egfr_slope_ratio = 0.575)
+# R2 kidney calibration: one decline rate at every eGFR
+kidney_r2 <- list(egfr_decline_ref = 0.65, egfr_slope_sdlog = 1.5, egfr_mult_4 = 1)
+# GLP-1 RA effects from FLOW (Perkovic 2024; Pratley 2024) with type 2 diabetes:
+# MACE 0.82, HF events 0.73, CV death 0.71, total eGFR slope ratio 0.65 (parameters
+# hr_flow_*, flow_egfr_slope_ratio); class effects without diabetes
+flow <- list(glp1_flow_dm = 1)
 # SGLT2i in patients without ASCVD (McGuire 2021): MACE 0.94, HHF 0.63, CV death 0.95
 no_ascvd <- list(hr_sglt2i_mace = 0.94, hr_sglt2i_hf = 0.63, hr_sglt2i_cv_death = 0.95)
 # Weight-related utility: -0.0061 per BMI unit above 25 (Bagust and Beale 2005, TTO
@@ -78,6 +89,7 @@ no_ascvd <- list(hr_sglt2i_mace = 0.94, hr_sglt2i_hf = 0.63, hr_sglt2i_cv_death 
 # baseline of 89.6 kg and BMI 32.0 (FLOW) = 1.46 BMI units; canagliflozin -0.80 kg at
 # BMI 31.3 (CREDENCE) = about 0.29 BMI units
 weight_util <- list(util_gain_glp1 = 0.009, util_gain_sglt2i = 0.002)
+addon <- list(addon_sglt2i = 1, addon_glp1 = 1)
 
 structural <- list(
   "Discount rate 0%"     = set_param_values(l_params, list(drc = 0, drq = 0)),
@@ -90,23 +102,24 @@ structural <- list(
   "Equal kidney effect" = set_param_values(l_params, list(glp1_egfr_slope_ratio = pv("sglt2i_egfr_slope_ratio"))),
   "No kidney effect" = set_param_values(l_params, list(sglt2i_egfr_slope_ratio = 1, glp1_egfr_slope_ratio = 1)),
   "Kidney effect only with albuminuria or eGFR <60" = set_param_values(l_params, list(kidney_effect_restrict = 1)),
-  "Add-on SGLT2i at HF hospitalization or CKD stage 4" = set_param_values(l_params, list(addon_sglt2i = 1)),
+  "Trial-slope-matched kidney effects" = set_param_values(l_params, matched),
+  "R2 kidney calibration (one decline rate)" = set_param_values(l_params, kidney_r2),
+  "Add-on therapy in both directions" = set_param_values(l_params, addon),
   "SGLT2i continued after kidney failure" = set_param_values(l_params, list(stop_sglt2i_at_kf = 0)),
+  "SGLT2i and GLP-1 RA stopped at dialysis" = set_param_values(l_params, list(stop_glp1_at_kf = 1)),
+  "Dialysis starting at eGFR 10" = set_param_values(l_params, list(dialysis_egfr = 10)),
+  "Age-dependent decision not to start dialysis" = set_param_values(l_params, list(dialysis_forgo = 1)),
   "Background mortality as all-cause (70% noncardiovascular)" = set_param_values(l_params, list(bg_mort_mult = 0.7)),
   "Half of incident HF hospitalized" = set_param_values(l_params, list(hf_hosp_frac = 0.5)),
   "SGLT2i effects without ASCVD" = set_param_values(l_params, no_ascvd),
-  "GLP-1 RA effects from FLOW" = set_param_values(l_params, flow),
+  "GLP-1 RA effects from FLOW in type 2 diabetes" = set_param_values(l_params, flow),
   "Weight-related utility gain" = set_param_values(l_params, weight_util),
   "Optimized standard of care" = set_param_values(l_params, list(soc_optimized = 1)),
   "PREVENT age capped at 79 years" = set_param_values(l_params, list(prevent_age_cap = 79)),
-  "Combined conservative" = set_param_values(l_params, c(list(addon_sglt2i = 1, bg_mort_mult = 0.7,
-                                                              hf_hosp_frac = 0.5), no_ascvd, flow, weight_util))
+  "PREVENT HbA1c model (without UACR)" = set_param_values(l_params, list(prevent_full = 0)),
+  "Combined conservative" = set_param_values(l_params, c(addon, list(bg_mort_mult = 0.7, hf_hosp_frac = 0.5),
+                                                         no_ascvd, flow, weight_util))
 )
-if (!anyNA(CHRONIC_SLOPE_RATIOS)) {
-  structural[["Chronic eGFR slope ratios"]] <- set_param_values(l_params, list(
-    sglt2i_egfr_slope_ratio = CHRONIC_SLOPE_RATIOS[["sglt2i"]],
-    glp1_egfr_slope_ratio   = CHRONIC_SLOPE_RATIOS[["glp1ra"]]))
-}
 
 capitalize <- function(x) paste0(toupper(substr(x, 1, 1)), substr(x, 2, nchar(x)))
 agent_pairs <- list(c("empagliflozin", "semaglutide"), c("dapagliflozin", "liraglutide"),

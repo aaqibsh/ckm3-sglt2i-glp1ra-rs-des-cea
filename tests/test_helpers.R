@@ -43,8 +43,19 @@ check("eGFR on boundary gives 0, not negative", time_to_next_ckd_stage(30, 2, 3)
 check("ESKD has no further progression", is.infinite(time_to_next_ckd_stage(14, 2, 5)))
 set.seed(2); m <- egfr_patient_multiplier(rep(30, 2e5), 0.451, 1.5, rnorm(2e5))
 check("heterogeneity multiplier has mean ~1 at UACR 30", abs(mean(m) - 1) < 0.05)
-check("ESKD cost replaces CKD 4 cost", ckd_state_cost(5, 7500, 15000, 92000) == 92000)
-check("ESKD decrement adds to CKD 4", ckd_state_disutility(5, 0.02, 0.05, 0.20) == 0.25)
+check("dialysis cost replaces CKD 4 cost", ckd_state_cost(5, 1, 1, 2743, 6745, 8746, 107240) == 107240)
+check("kidney failure before dialysis costs the CKD 4 amount", ckd_state_cost(5, 1, 0, 2743, 6745, 8746, 107240) == 8746)
+check("stage 3a and 3b costs", ckd_state_cost(3, 0, 0, 2743, 6745, 8746, 107240) == 2743 &&
+        ckd_state_cost(3, 1, 0, 2743, 6745, 8746, 107240) == 6745)
+check("dialysis decrement adds to CKD 4", ckd_state_disutility(5, 1, 0.02, 0.05, 0.20) == 0.25 &&
+        ckd_state_disutility(5, 0, 0.02, 0.05, 0.20) == 0.05)
+check("band multipliers", kidney_band_multiplier(3, 0, 1.2, 1.5) == 1 && kidney_band_multiplier(3, 1, 1.2, 1.5) == 1.2 &&
+        kidney_band_multiplier(4, 1, 1.2, 1.5) == 1.5)
+check("years to eGFR 15 piecewise", abs(years_to_egfr15(60, 1, 1, 2) - (15 + 15 + 7.5)) < 1e-12 &&
+        abs(years_to_egfr15(25, 2, 1, 2) - 2.5) < 1e-12)
+check("time to eGFR target", time_to_egfr(50, 2, 45) == 2.5 && time_to_egfr(40, 2, 45) == 0 && is.infinite(time_to_egfr(50, 0, 45)))
+check("dialysis decision by age (Wong 2016)", abs(p_forgo_dialysis(30) - 0.038) < 1e-12 &&
+        abs(p_forgo_dialysis(90) - 0.467) < 1e-12 && abs(p_forgo_dialysis(65) - (0.038 + 0.429 / 2)) < 1e-12)
 
 cat("--- Risk equations ---\n")
 h <- calculate_base_hazards(62, 1, 145, 220, 40, 1, 0, 50, 1, 1, 33, 7.5, 0, 0, 0, 3,
@@ -74,7 +85,10 @@ check("payer-by-age prices", pv[["cost_sglt2i"]] == 4250 && pv[["cost_glp1ra"]] 
         pv[["cost_sglt2i_mcr"]] == 2397 && pv[["age_medicare"]] == 65)
 check("scenario switches off in the base case", pv[["addon_sglt2i"]] == 0 && pv[["bg_mort_mult"]] == 1 &&
         pv[["kidney_effect_restrict"]] == 0 && pv[["hf_hosp_frac"]] == 1 && pv[["soc_optimized"]] == 0 &&
-        pv[["util_gain_glp1"]] == 0 && pv[["prevent_age_cap"]] == 999)
+        pv[["util_gain_glp1"]] == 0 && pv[["prevent_age_cap"]] == 999 && pv[["addon_glp1"]] == 0 &&
+        pv[["stop_glp1_at_kf"]] == 0 && pv[["glp1_flow_dm"]] == 0 && pv[["dialysis_egfr"]] == 15 &&
+        pv[["dialysis_forgo"]] == 0)
+check("PREVENT full model in the base case", pv[["prevent_full"]] == 1)
 
 cat("--- Correlated PSA draws ---\n")
 set.seed(1)
@@ -96,29 +110,32 @@ check("risk-equivalent: G3b A2", stage3_risk_equivalent(40, 50, 0.05))
 check("risk-equivalent: G3a A2 is not very high risk", !stage3_risk_equivalent(50, 50, 0.05))
 check("risk-equivalent: total CVD >= 20%", stage3_risk_equivalent(80, 10, 0.20))
 source("R/09_results.R")
-# Treatment-years: SGLT2i 2.5 + 3, GLP-1 RA 2 + 2 (commercial + Medicare)
+# Patient-level repricing: one patient per arm and diabetes status. Treatment-years
+# 2 commercial + 3 Medicare for every treated patient.
 pr <- drug_prices(l_params)
-arms <- data.table(arm = c("sglt2i", "glp1ra", "soc"), costs = c(220000, 230000, 200000),
-                   qalys = c(8.25, 8.10, 8.00), lys = c(10.2, 10.1, 10),
-                   drug_cost_com = c(pr[["cost_sglt2i"]] * 2.5, 6830 * 2, 0),
-                   drug_cost_mcr = c(pr[["cost_sglt2i_mcr"]] * 3, 3334 * 2, 0))
-arms[, drug_cost := drug_cost_com + drug_cost_mcr]
-inc <- rbindlist(lapply(DEFAULT_COMPARISONS, function(cp) compare_tab(arms, cp[1], cp[2])))
-thr <- threshold_prices(arms, inc, l_params, wtps = 120000)
+check("GLP-1 RA commercial price with diabetes is Ozempic-adjusted", abs(pr[["cost_glp1ra_dm"]] - 6830 * 1028 / 1349) < 1e-9)
+ps <- CJ(arm = c("sglt2i", "glp1ra", "soc"), diabetes = c(0, 1))
+ps[, `:=`(pat_id = diabetes + 1, qalys = c(8.25, 8.25, 8.10, 8.10, 8.00, 8.00)[match(paste(arm, diabetes), paste(rep(c("sglt2i", "glp1ra", "soc"), each = 2), c(0, 1)))],
+          lys = 10)]
+ps[, drug_cost_com := 2 * pt_price(pr, arm, "com", diabetes)]
+ps[, drug_cost_mcr := 3 * pt_price(pr, arm, "mcr", diabetes)]
+ps[, costs := 200000 + drug_cost_com + drug_cost_mcr]
+r0 <- reprice(ps, pr, c())
+check("reprice: treatment-years recovered", isTRUE(all.equal(r0$arms[arm != "soc", d_com], c(2, 2))) &&
+        isTRUE(all.equal(r0$arms[arm != "soc", d_mcr], c(3, 3))))
+r1 <- reprice(ps, pr, set_prices(pr, "glp1ra", com = 6830))
+check("reprice: one GLP-1 RA price adds the diabetes discount back",
+      abs(r1$arms[arm == "glp1ra", costs] - r0$arms[arm == "glp1ra", costs] - 0.5 * 2 * (6830 - pr[["cost_glp1ra_dm"]])) < 1e-6)
+r2 <- reprice(ps, pr, set_prices(pr, "sglt2i", com = 67, mcr = 67, dm = "dm"))
+check("reprice: generic dapagliflozin only with diabetes",
+      abs(r2$arms[arm == "sglt2i", costs] - r0$arms[arm == "sglt2i", costs] - 0.5 * (2 * (67 - 4250) + 3 * (67 - 2397))) < 1e-6)
+thr <- threshold_prices(ps, l_params, wtps = 120000)
 g_soc <- thr[comparison == "GLP-1 RA + SoC vs SoC"]
+inmb0 <- 120000 * 0.10 - (r0$arms[arm == "glp1ra", costs] - r0$arms[arm == "soc", costs])
 check("threshold price: GLP-1 RA vs SoC, commercial price", abs(g_soc[1, threshold_price] -
-        (6830 + (120000 * 0.10 - 30000) / 2)) < 1e-9)
+        (r0$arms[arm == "glp1ra", drug_cost_com] + inmb0) / 2) < 1e-6)
 check("threshold price: GLP-1 RA vs SoC, single price", abs(g_soc[2, threshold_price] -
-        ((6830 * 2 + 3334 * 2) + (120000 * 0.10 - 30000)) / 4) < 1e-9)
-check("threshold price: GLP-1 RA vs SGLT2i uses reversed INMB",
-      abs(thr[comparison == "GLP-1 RA + SoC vs SGLT2i + SoC"][1, threshold_price] -
-            (6830 - (120000 * 0.15 + 10000) / 2)) < 1e-9)
-rp <- reprice(arms, drug_prices(l_params), c(cost_glp1ra = 6830 + 1000, cost_glp1ra_mcr = 3334 - 500))
-check("reprice: GLP-1 RA cost changes by treatment-years x price change",
-      abs(rp$arms[arm == "glp1ra", costs] - (230000 + 1000 * 2 - 500 * 2)) < 1e-9 &&
-        rp$arms[arm == "sglt2i", costs] == 220000)
-rp0 <- reprice(arms, drug_prices(l_params), c(cost_sglt2i = pr[["cost_sglt2i"]]))
-check("reprice: unchanged prices reproduce the increments", isTRUE(all.equal(rp0$incremental$inc_cost, inc$inc_cost)))
+        (r0$arms[arm == "glp1ra", drug_cost] + inmb0) / 5) < 1e-6)
 
 pop <- generate_ckm_population(5000, 3, seed = 42)
 check("non-diabetic HbA1c < 6.5%", all(pop[diabetes == 0, hba1c] < 6.5))

@@ -2,7 +2,7 @@
 # File: 09_results.R
 # Purpose: Process and visualise WARDEN DES model results
 # Author: CKM-HEOR Team
-# Date: 2026-10-14 (revised — drug cost per arm, threshold prices)
+# Date: 2026-11-09 (revised — patient-level repricing with prices by diabetes)
 # =============================================================================
 # WARDEN results structure: results[[analysis]][[simulation]], each element
 # holding named-by-arm vectors (total_costs, total_qalys, total_lys, and any
@@ -29,7 +29,9 @@ PARAM_LABELS <- c(
   cost_soc = "SoC annual cost",
   cost_mi_acute = "MI acute cost", cost_stroke_acute = "Stroke acute cost", cost_hf_hosp = "HF hospitalization cost",
   cost_mi_post = "Post-MI annual cost", cost_stroke_post = "Post-stroke annual cost", cost_hf_post = "Post-HF annual cost",
-  cost_ckd3_annual = "CKD 3 annual cost", cost_ckd4_annual = "CKD 4 annual cost", cost_eskd_annual = "Kidney failure annual cost",
+  glp1_dm_price_ratio = "GLP-1 RA price ratio with diabetes (Ozempic/Wegovy)",
+  cost_ckd3a_annual = "CKD 3a annual cost", cost_ckd3b_annual = "CKD 3b annual cost",
+  cost_ckd4_annual = "CKD 4 annual cost", cost_eskd_annual = "Dialysis annual cost",
   cost_bg_base = "Background cost (base)", cost_bg_age_coef = "Background cost per year of age",
   util_baseline = "Baseline utility", util_dec_mi_acute = "Disutility: MI (acute)",
   util_dec_mi_chronic = "Disutility: MI (chronic)", util_dec_stroke_acute = "Disutility: stroke (acute)",
@@ -51,7 +53,12 @@ PARAM_LABELS <- c(
   bg_mort_mult = "Background mortality multiplier", kidney_effect_restrict = "Kidney effect restricted",
   hf_hosp_frac = "Share of incident HF hospitalized", util_gain_sglt2i = "Utility gain on SGLT2i",
   util_gain_glp1 = "Utility gain on GLP-1 RA", prevent_age_cap = "PREVENT age cap (y)",
-  soc_optimized = "Optimized standard of care",
+  soc_optimized = "Optimized standard of care", egfr_mult_3b = "eGFR decline multiplier, eGFR 30-44",
+  egfr_mult_4 = "eGFR decline multiplier, eGFR <30", stop_glp1_at_kf = "GLP-1 RA stopped at kidney failure",
+  addon_glp1 = "Add-on GLP-1 RA in SGLT2i arm", addon_glp1_uacr = "UACR threshold for add-on GLP-1 RA",
+  sglt2i_uacr_reduction = "SGLT2i UACR reduction", glp1_flow_dm = "GLP-1 RA FLOW effects in diabetes",
+  dialysis_egfr = "eGFR at dialysis start", dialysis_forgo = "Age-dependent decision not to start dialysis",
+  prevent_full = "PREVENT full model (UACR, HbA1c)",
   psa_hr_rho = "Correlation of class log HRs in PSA"
 )
 
@@ -127,7 +134,8 @@ summarise_deterministic <- function(results, wtp = 120000,
     prop_eskd = get_var("fl_eskd"), end_egfr = get_var("egfr_cur"),
     prop_on_tx = get_var("fl_on_treatment"),
     drug_cost_com = get_var("c_drug_com"), drug_cost_mcr = get_var("c_drug_mcr"),
-    addon_cost = get_var("c_addon"), prop_addon = get_var("addon_on")
+    addon_cost = get_var("c_addon"), prop_addon = get_var("addon_on"),
+    prop_dialysis = get_var("fl_dialysis"), prop_conservative = get_var("fl_conservative")
   )
   arm_tab[, drug_cost := drug_cost_com + drug_cost_mcr]
   comparisons <- Filter(function(cp) all(cp %in% arms), comparisons)
@@ -135,27 +143,54 @@ summarise_deterministic <- function(results, wtp = 120000,
   list(arms = arm_tab, incremental = inc_tab)
 }
 
-#' Base-case drug prices of a parameter set
-#' @return Named numeric: cost_sglt2i, cost_sglt2i_mcr, cost_glp1ra, cost_glp1ra_mcr
+#' Base-case drug prices of a parameter set, by drug, payer and diabetes status
+#'
+#' @return Named numeric with eight prices: cost_<drug>[_mcr][_dm], drug = sglt2i or
+#'   glp1ra; _mcr = Medicare (else commercial); _dm = with type 2 diabetes. The
+#'   commercial GLP-1 RA price with diabetes is cost_glp1ra x glp1_dm_price_ratio.
 drug_prices <- function(params) {
   pv <- setNames(unlist(params$base_value), unlist(params$parameter_name))
-  pv[c("cost_sglt2i", "cost_sglt2i_mcr", "cost_glp1ra", "cost_glp1ra_mcr")]
+  c(cost_sglt2i = pv[["cost_sglt2i"]], cost_sglt2i_dm = pv[["cost_sglt2i"]],
+    cost_sglt2i_mcr = pv[["cost_sglt2i_mcr"]], cost_sglt2i_mcr_dm = pv[["cost_sglt2i_mcr"]],
+    cost_glp1ra = pv[["cost_glp1ra"]], cost_glp1ra_dm = pv[["cost_glp1ra"]] * pv[["glp1_dm_price_ratio"]],
+    cost_glp1ra_mcr = pv[["cost_glp1ra_mcr"]], cost_glp1ra_mcr_dm = pv[["cost_glp1ra_mcr"]])
 }
 
-#' Discounted treatment-years per patient in each payer period
+#' Set a drug's prices in a price vector
+#'
+#' @param prices Output of drug_prices()
+#' @param drug "sglt2i" or "glp1ra"
+#' @param com,mcr Commercial and Medicare annual prices (NULL = unchanged)
+#' @param dm "both", "dm" (type 2 diabetes only) or "nodm"
+set_prices <- function(prices, drug, com = NULL, mcr = NULL, dm = "both") {
+  sfx <- switch(dm, both = c("", "_dm"), dm = "_dm", nodm = "")
+  if (!is.null(com)) prices[paste0("cost_", drug, sfx)] <- com
+  if (!is.null(mcr)) prices[paste0("cost_", drug, "_mcr", sfx)] <- mcr
+  prices
+}
+
+#' Each patient's annual price for an arm, payer and diabetes status
+pt_price <- function(prices, arm, payer, dm) {
+  key <- paste0("cost_", arm, ifelse(payer == "mcr", "_mcr", ""), ifelse(dm == 1, "_dm", ""))
+  ifelse(arm == "soc", 0, unname(prices[ifelse(arm == "soc", "cost_sglt2i", key)]))
+}
+
+#' Discounted treatment-years of each patient in each payer period
 #'
 #' @description Drug cost accrues at the commercial price before the switch to
-#'   Medicare and at the Medicare price after it (c_drug_com, c_drug_mcr), so
-#'   drug cost / price gives the discounted years on treatment in each period.
-#' @param arms Arm table from summarise_deterministic()
+#'   Medicare and at the Medicare price after it (c_drug_com, c_drug_mcr), so drug
+#'   cost / price gives the discounted years on treatment in each period.
+#' @param ps Patient-level table (patient_summary()): arm, diabetes, costs, qalys,
+#'   lys, drug_cost_com, drug_cost_mcr
 #' @param prices Prices used for the run (drug_prices())
-#' @return data.table: arm, d_com, d_mcr
-treatment_years <- function(arms, prices) {
-  pc <- c(sglt2i = prices[["cost_sglt2i"]], glp1ra = prices[["cost_glp1ra"]], soc = NA)
-  pm <- c(sglt2i = prices[["cost_sglt2i_mcr"]], glp1ra = prices[["cost_glp1ra_mcr"]], soc = NA)
-  data.table(arm = arms$arm,
-             d_com = ifelse(arms$arm == "soc", 0, arms$drug_cost_com / pc[arms$arm]),
-             d_mcr = ifelse(arms$arm == "soc", 0, arms$drug_cost_mcr / pm[arms$arm]))
+#' @return ps with d_com and d_mcr added
+treatment_years <- function(ps, prices) {
+  out <- copy(ps)
+  pc <- pt_price(prices, out$arm, "com", out$diabetes)
+  pm <- pt_price(prices, out$arm, "mcr", out$diabetes)
+  out[, `:=`(d_com = ifelse(arm == "soc", 0, drug_cost_com / pc),
+             d_mcr = ifelse(arm == "soc", 0, drug_cost_mcr / pm))]
+  out
 }
 
 #' Pairwise comparison from an arm table (costs, qalys, lys)
@@ -169,42 +204,42 @@ compare_tab <- function(arms, int, comp, wtp = 120000) {
 
 #' Results at other drug prices, exactly
 #'
-#' @description Drug cost is linear in each price, so total cost at new prices is
-#'   the run's cost minus its drug cost plus the treatment-years times the new
-#'   prices. QALYs and life-years do not depend on price.
-#' @param arms Arm table from summarise_deterministic()
+#' @description Drug cost is linear in each price, so each patient's total cost at
+#'   new prices is the run's cost minus its drug cost plus the treatment-years times
+#'   the new prices. QALYs and life-years do not depend on price.
+#' @param ps Patient-level table (patient_summary())
 #' @param prices0 Prices used for the run (drug_prices())
-#' @param prices1 New prices: named numeric with any of the four price names
-#' @return list(arms, incremental)
-reprice <- function(arms, prices0, prices1, wtp = 120000, comparisons = DEFAULT_COMPARISONS) {
+#' @param prices1 New prices (any of the eight names of drug_prices())
+#' @return list(arms, incremental): arm means and pairwise results
+reprice <- function(ps, prices0, prices1, wtp = 120000, comparisons = DEFAULT_COMPARISONS) {
   p1 <- prices0; p1[names(prices1)] <- prices1
-  ty <- treatment_years(arms, prices0)
-  out <- merge(copy(arms), ty, by = "arm", sort = FALSE)
-  pc <- c(sglt2i = p1[["cost_sglt2i"]], glp1ra = p1[["cost_glp1ra"]], soc = 0)
-  pm <- c(sglt2i = p1[["cost_sglt2i_mcr"]], glp1ra = p1[["cost_glp1ra_mcr"]], soc = 0)
-  out[, `:=`(drug_cost_com = d_com * pc[arm], drug_cost_mcr = d_mcr * pm[arm])]
-  out[, costs := costs - drug_cost + drug_cost_com + drug_cost_mcr]
-  out[, drug_cost := drug_cost_com + drug_cost_mcr]
-  out[, c("d_com", "d_mcr") := NULL]
-  comparisons <- Filter(function(cp) all(cp %in% out$arm), comparisons)
-  list(arms = out, incremental = rbindlist(lapply(comparisons, function(cp) compare_tab(out, cp[1], cp[2], wtp))))
+  ty <- treatment_years(ps, prices0)
+  ty[, `:=`(drug_com1 = d_com * pt_price(p1, arm, "com", diabetes),
+            drug_mcr1 = d_mcr * pt_price(p1, arm, "mcr", diabetes))]
+  ty[, costs1 := costs - drug_cost_com - drug_cost_mcr + drug_com1 + drug_mcr1]
+  arms <- ty[, .(costs = mean(costs1), qalys = mean(qalys), lys = mean(lys),
+                 drug_cost_com = mean(drug_com1), drug_cost_mcr = mean(drug_mcr1),
+                 d_com = mean(d_com), d_mcr = mean(d_mcr)), by = arm]
+  arms[, drug_cost := drug_cost_com + drug_cost_mcr]
+  comparisons <- Filter(function(cp) all(cp %in% arms$arm), comparisons)
+  list(arms = arms, incremental = rbindlist(lapply(comparisons, function(cp) compare_tab(arms, cp[1], cp[2], wtp))))
 }
 
 #' Threshold annual drug prices at which a comparison breaks even
 #'
-#' @description INMB is linear in each price: INMB(p) = INMB(p0) - (p - p0) * D,
-#'   with D the discounted treatment-years in the payer period(s) whose price
-#'   varies. Two thresholds per comparison and WTP: the commercial price with the
-#'   Medicare price held at its base value, and a single price paid by all payers.
-#' @param arms,incremental Tables from summarise_deterministic()
+#' @description INMB is linear in each price. Two thresholds per comparison and
+#'   WTP, each a single price for patients with and without diabetes: the
+#'   commercial price with the Medicare price held at its base value, and one price
+#'   paid by all payers. current_price is the average price now paid in the period
+#'   that varies (drug cost / discounted treatment-years).
+#' @param ps Patient-level table (patient_summary())
 #' @param params Parameter lists used for the run (base prices)
 #' @param wtps Willingness-to-pay thresholds
 #' @return data.table: drug, comparison, basis, wtp, current_price, treatment years,
 #'   INMB at current prices, threshold_price
-threshold_prices <- function(arms, incremental, params, wtps = c(100000, 120000, 150000)) {
-  pr <- drug_prices(params)
-  ty <- treatment_years(arms, pr)
-  pc <- c(sglt2i = pr[["cost_sglt2i"]], glp1ra = pr[["cost_glp1ra"]])
+threshold_prices <- function(ps, params, wtps = c(100000, 120000, 150000)) {
+  r <- reprice(ps, drug_prices(params), c())
+  arms <- r$arms; incremental <- r$incremental
   inc <- function(a, b) incremental[incremental$int == a & incremental$comp == b]
   specs <- list(
     list(drug = "glp1ra", vs = "soc",    label = "GLP-1 RA + SoC vs SoC"),
@@ -215,16 +250,15 @@ threshold_prices <- function(arms, incremental, params, wtps = c(100000, 120000,
   rbindlist(lapply(specs, function(sp) {
     row <- inc(sp$drug, sp$vs); sgn <- 1
     if (nrow(row) == 0) { row <- inc(sp$vs, sp$drug); sgn <- -1 }
-    d_com <- ty[arm == sp$drug]$d_com; d_mcr <- ty[arm == sp$drug]$d_mcr
-    drug0 <- arms[arm == sp$drug]$drug_cost
+    a <- arms[arm == sp$drug]
     rbindlist(lapply(wtps, function(w) {
       inmb <- sgn * (w * row$inc_qaly - row$inc_cost)
       data.table(drug = sp$drug, comparison = sp$label, wtp = w,
                  basis = c("Commercial price (Medicare price fixed)", "Single price, all payers"),
-                 current_price = c(pc[[sp$drug]], drug0 / (d_com + d_mcr)),
-                 discounted_treatment_years = c(d_com, d_com + d_mcr),
+                 current_price = c(a$drug_cost_com / a$d_com, a$drug_cost / (a$d_com + a$d_mcr)),
+                 discounted_treatment_years = c(a$d_com, a$d_com + a$d_mcr),
                  inmb_at_current_price = inmb,
-                 threshold_price = c(pc[[sp$drug]] + inmb / d_com, (drug0 + inmb) / (d_com + d_mcr)))
+                 threshold_price = c((a$drug_cost_com + inmb) / a$d_com, (a$drug_cost + inmb) / (a$d_com + a$d_mcr)))
     }))
   }))
 }

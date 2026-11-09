@@ -3,7 +3,7 @@
 # Purpose: Treatment-effect, waning and kidney-trajectory helpers used inside
 #          WARDEN delayed-execution blocks (05_events.R, 06_reactions.R)
 # Author: CKM-HEOR Team
-# Date: 2026-09-28 (rewritten — previous helpers were unused)
+# Date: 2026-11-09 (revised — stage 3a/3b costs, eGFR bands, dialysis start)
 # =============================================================================
 # All event hazards are exponential (piecewise-constant), so whenever a hazard
 # changes from h_old to h_new at time t, a pending event time T can be updated
@@ -119,12 +119,54 @@ time_to_next_ckd_stage <- function(egfr, slope, ckd_stage) {
   max(0, (egfr - b) / slope)
 }
 
-#' Annual CKD management cost for a CKD stage (ESKD replaces, not adds to, CKD 4)
-ckd_state_cost <- function(ckd_stage, cost_ckd3, cost_ckd4, cost_eskd) {
-  if (ckd_stage >= 5) cost_eskd else if (ckd_stage == 4) cost_ckd4 else if (ckd_stage == 3) cost_ckd3 else 0
+#' Time until a linear eGFR trajectory reaches a given eGFR value (Inf if never)
+time_to_egfr <- function(egfr, slope, target) {
+  if (slope <= 0 || egfr <= target) return(if (egfr <= target) 0 else Inf)
+  (egfr - target) / slope
 }
 
-#' Utility decrement for a CKD stage (ESKD decrement is on top of the CKD 4 decrement)
-ckd_state_disutility <- function(ckd_stage, dec_ckd3, dec_ckd4, dec_eskd) {
-  if (ckd_stage >= 5) dec_ckd4 + dec_eskd else if (ckd_stage == 4) dec_ckd4 else if (ckd_stage == 3) dec_ckd3 else 0
+#' Multiplier on the eGFR decline rate by kidney function band
+#'
+#' @description Lets the decline steepen as eGFR falls (calibration, 01_parameters.R):
+#'   1 at eGFR >= 45, mult_3b at 30-44 (stage 3 with eGFR < 45), mult_4 below 30.
+#' @param ckd_stage CKD stage (1, 3, 4, 5); @param sub3b 1 when eGFR < 45 in stage 3
+kidney_band_multiplier <- function(ckd_stage, sub3b, mult_3b, mult_4) {
+  if (ckd_stage >= 4) mult_4 else if (ckd_stage == 3 && sub3b == 1) mult_3b else 1
+}
+
+#' Death-free years from eGFR e0 to eGFR 15 at a band-dependent decline rate
+#'
+#' @param e0 eGFR now; @param s Decline rate at eGFR >= 45 (vectorised)
+years_to_egfr15 <- function(e0, s, mult_3b, mult_4) {
+  pmax(e0 - 45, 0) / s + pmax(pmin(e0, 45) - 30, 0) / (s * mult_3b) + (pmin(e0, 30) - 15) / (s * mult_4)
+}
+
+#' Annual added kidney cost for the current kidney state
+#'
+#' @description Stage 3a or 3b (sub3b), stage 4, and eGFR < 15: dialysis cost on
+#'   dialysis (replaces the CKD 4 cost), CKD 4 cost before dialysis starts or under
+#'   conservative care (kidney failure without kidney replacement therapy).
+ckd_state_cost <- function(ckd_stage, sub3b, dialysis, cost_3a, cost_3b, cost_ckd4, cost_eskd) {
+  if (ckd_stage >= 5) { if (dialysis == 1) cost_eskd else cost_ckd4 }
+  else if (ckd_stage == 4) cost_ckd4
+  else if (ckd_stage == 3) { if (sub3b == 1) cost_3b else cost_3a }
+  else 0
+}
+
+#' Utility decrement for the current kidney state (dialysis decrement on top of CKD 4)
+ckd_state_disutility <- function(ckd_stage, dialysis, dec_ckd3, dec_ckd4, dec_eskd) {
+  if (ckd_stage >= 5) dec_ckd4 + (if (dialysis == 1) dec_eskd else 0)
+  else if (ckd_stage == 4) dec_ckd4
+  else if (ckd_stage == 3) dec_ckd3
+  else 0
+}
+
+#' Probability of a decision not to start dialysis at kidney failure, by age
+#'
+#' @description Wong et al. CJASN 2016 (US veterans with sustained eGFR < 15): the
+#'   share with a decision not to pursue dialysis rose linearly with age from 3.8%
+#'   (< 45 years) to 46.7% (>= 85 years). Linear between ages 42.5 and 87.5,
+#'   constant outside.
+p_forgo_dialysis <- function(age) {
+  0.038 + (0.467 - 0.038) * min(1, max(0, (age - 42.5) / 45))
 }

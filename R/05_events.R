@@ -2,7 +2,7 @@
 # File: 05_events.R
 # Purpose: WARDEN event initialization — defines init_event_list
 # Author: CKM-HEOR Team
-# Date: 2026-10-14 (revised — time-horizon event)
+# Date: 2026-11-09 (revised — eGFR 45 and dialysis events)
 # =============================================================================
 # One definition serves all three arms: arm-specific treatment effects are
 # already folded into h_cur (unique_pt_inputs, 08_run_model.R). WARDEN seeds the
@@ -12,12 +12,14 @@
 # treatment effects rather than sampling noise.
 #
 # Events: start, mi, stroke, hf_hosp, ckd_prog, death_cv, death_noncv,
-#         tx_discont, tx_wane, age_update, horizon, medicare, addon_discont
+#         tx_discont, tx_wane, age_update, horizon, medicare, addon_discont,
+#         egfr45, dialysis
 # horizon ends follow-up at horizon_years (100 = lifetime; 10/20 in scenarios).
 # ESKD is the ckd_prog event that crosses eGFR 15 (sets fl_eskd = 1).
 # medicare switches drug prices from commercial to Medicare at age_medicare;
-# addon_discont ends an add-on SGLT2i (addon_sglt2i scenario). Neither draws a
-# random number at initialisation.
+# addon_discont ends an add-on (addon_sglt2i, addon_glp1 scenarios). egfr45 marks
+# eGFR < 45 (stage 3b cost); dialysis starts dialysis below eGFR 15 (dialysis_egfr
+# scenario). None of these draws a random number at initialisation.
 # =============================================================================
 
 #' Build the initialization event list for WARDEN
@@ -31,7 +33,7 @@ build_init_events <- function() {
     arm = c("soc", "sglt2i", "glp1ra"),
     evts = c("start", "mi", "stroke", "hf_hosp", "ckd_prog",
              "death_cv", "death_noncv", "tx_discont", "tx_wane", "age_update", "horizon",
-             "medicare", "addon_discont"),
+             "medicare", "addon_discont", "egfr45", "dialysis"),
     input = {
       start       <- 0
       # draw_tte("exp") expects coef1 on the log scale: rexp(1, exp(coef1))
@@ -48,7 +50,9 @@ build_init_events <- function() {
       age_update  <- 1.0   # First yearly update
       horizon     <- horizon_years   # deterministic; no random draw
       medicare    <- if (fl_mcr == 1) Inf else age_medicare - pt_age
-      addon_discont <- Inf   # scheduled when an add-on SGLT2i starts
+      addon_discont <- Inf   # scheduled when an add-on starts
+      egfr45      <- t_egfr45  # stage 3a -> 3b cost; rescheduled by refresh_kidney()
+      dialysis    <- Inf       # scheduled after kidney failure when dialysis_egfr < 15
     }
   )
 

@@ -155,15 +155,15 @@ validate_prevent_equations <- function(n_test = 20, seed = 123, tol = 0.01) {
       total_c = runif(1, 130, 320), hdl_c = runif(1, 20, 100),
       statin = sample(c(TRUE, FALSE), 1), dm = sample(c(TRUE, FALSE), 1),
       smoking = sample(c(TRUE, FALSE), 1), egfr = runif(1, 15, 140),
-      bmi = runif(1, 18.5, 39.9), hba1c = runif(1, 4.5, 15)
+      bmi = runif(1, 18.5, 39.9), hba1c = runif(1, 4.5, 15), uacr = exp(runif(1, log(3), log(5000)))
     )
-    for (mdl in c("base", "hba1c")) {
+    for (mdl in c("base", "hba1c", "full")) {
       ref <- preventr:::run_models(mdl, d$sex, "10yr", preventr:::prep_terms(d, mdl), dp = 12)
       for (o in names(outcomes)) {
         ours_h <- calculate_prevent_hazard(
           d$age, as.integer(d$sex == "male"), d$sbp, d$total_c, d$hdl_c, d$dm, d$smoking,
-          d$egfr, d$statin, d$bp_tx, d$bmi, if (mdl == "hba1c") d$hba1c else NULL,
-          outcome = o, use_hba1c = (mdl == "hba1c"))
+          d$egfr, d$statin, d$bp_tx, d$bmi, if (mdl != "base") d$hba1c else NULL,
+          outcome = o, use_hba1c = (mdl != "base"), uacr = d$uacr, model = mdl)
         ours_p <- 1 - exp(-10 * ours_h)
         ref_p <- ref[[outcomes[[o]]]]
         errs[[length(errs) + 1]] <- data.frame(patient = k, model = mdl, outcome = o,
@@ -211,7 +211,7 @@ validate_kidney_calibration <- function(params = l_params, n_per_stage = 2000, n
   z <- matrix(rnorm(nrow(pop) * n_rep), nrow(pop))
   slope <- base$egfr_decline_ref *
     egfr_patient_multiplier(pop$uacr, base$egfr_uacr_beta, base$egfr_slope_sdlog, z)
-  t_eskd <- (pop$egfr - 15) / slope   # linear decline; no stage dependence
+  t_eskd <- years_to_egfr15(pop$egfr, slope, base$egfr_mult_3b, base$egfr_mult_4)
 
   res <- data.table(
     horizon = c(2, 5),
