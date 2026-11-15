@@ -75,7 +75,8 @@ pv <- function(nm) l_params$base_value[[match(nm, unlist(l_params$parameter_name
 # Trial-slope-matched ratios: 1 - trial total-slope difference / model untreated
 # decline in a population with the trial's baseline eGFR and UACR (3.27 DAPA-CKD,
 # 2.73 FLOW; scripts/kidney_slope_check.R)
-matched <- list(sglt2i_egfr_slope_ratio = 0.709, glp1_egfr_slope_ratio = 0.575)
+# (MATCHED_KIDNEY and set_kidney_matched() in R/01_parameters.R; co-primary analysis
+# when CKM_ANALYSIS = "matched")
 # R2 kidney calibration: one decline rate at every eGFR
 kidney_r2 <- list(egfr_decline_ref = 0.65, egfr_slope_sdlog = 1.5, egfr_mult_4 = 1)
 # GLP-1 RA effects from FLOW (Perkovic 2024; Pratley 2024) with type 2 diabetes:
@@ -102,7 +103,7 @@ structural <- list(
   "Equal kidney effect" = set_param_values(l_params, list(glp1_egfr_slope_ratio = pv("sglt2i_egfr_slope_ratio"))),
   "No kidney effect" = set_param_values(l_params, list(sglt2i_egfr_slope_ratio = 1, glp1_egfr_slope_ratio = 1)),
   "Kidney effect only with albuminuria or eGFR <60" = set_param_values(l_params, list(kidney_effect_restrict = 1)),
-  "Trial-slope-matched kidney effects" = set_param_values(l_params, matched),
+  "Trial-slope-matched kidney effects" = set_kidney_matched(l_params),
   "R2 kidney calibration (one decline rate)" = set_param_values(l_params, kidney_r2),
   "Add-on therapy in both directions" = set_param_values(l_params, addon),
   "SGLT2i continued after kidney failure" = set_param_values(l_params, list(stop_sglt2i_at_kf = 0)),
@@ -133,8 +134,8 @@ scenarios <- scenarios[idx %% n_parts == (part - 1) %% n_parts]
 suffix <- if (group == "all") "" else paste0("_", group, if (n_parts > 1) paste0("_part", part) else "")
 cat(sprintf("Group %s, part %d/%d: %s\n", group, part, n_parts, paste(names(scenarios), collapse = " | ")))
 
-dir.create("outputs/tables", recursive = TRUE, showWarnings = FALSE)
-fwrite(DRUG_SPECIFIC_INPUTS, "outputs/tables/drug_specific_inputs.csv")
+dir.create(file.path(OUT_DIR, "tables"), recursive = TRUE, showWarnings = FALSE)
+fwrite(DRUG_SPECIFIC_INPUTS, file.path(OUT_DIR, "tables/drug_specific_inputs.csv"))
 
 for (stage in stages) {
   cat(sprintf("\n===== CKM Stage %d: %d patients =====\n", stage, n_pat))
@@ -157,8 +158,8 @@ for (stage in stages) {
                     icer_label, inmb = round(inmb))])
   cat(sprintf("Run time: %.1f minutes\n", t_run[3] / 60))
 
-  fwrite(arm_tab, sprintf("outputs/tables/scenarios_stage%d%s_arms.csv", stage, suffix))
-  fwrite(inc_tab, sprintf("outputs/tables/scenarios_stage%d%s_incremental.csv", stage, suffix))
+  fwrite(arm_tab, sprintf("%s/tables/scenarios_stage%d%s_arms.csv", OUT_DIR, stage, suffix))
+  fwrite(inc_tab, sprintf("%s/tables/scenarios_stage%d%s_incremental.csv", OUT_DIR, stage, suffix))
 }
 
 cat("\n=== Scenarios Complete ===\n")

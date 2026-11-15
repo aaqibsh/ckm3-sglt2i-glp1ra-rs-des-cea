@@ -18,9 +18,9 @@ source("R/00_setup.R")
 source("R/09_results.R")
 
 STAGE <- 3
-tab <- function(x) sprintf("outputs/tables/%s", x)
+tab <- function(x) sprintf("%s/tables/%s", OUT_DIR, x)
 read_files <- function(pattern) {
-  files <- list.files("outputs/tables", pattern = pattern, full.names = TRUE)
+  files <- list.files(file.path(OUT_DIR, "tables"), pattern = pattern, full.names = TRUE)
   if (length(files) == 0) return(NULL)
   rbindlist(lapply(files, fread), fill = TRUE)
 }
@@ -32,12 +32,13 @@ md_table <- function(dt) {
 }
 fmt_usd <- function(x) ifelse(is.na(x), "", paste0(ifelse(x < 0, "-$", "$"), format(round(abs(x)), big.mark = ",", trim = TRUE)))
 pct <- function(x, d = 1) sprintf(paste0("%.", d, "f%%"), x)
-dir.create("outputs/figures", recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(OUT_DIR, "figures"), recursive = TRUE, showWarnings = FALSE)
 slug <- function(x) gsub("[^a-z0-9]+", "_", tolower(x))
 
 md <- c("# CKM-HEOR Results — CKM Stage 3", "",
-        sprintf("Generated %s (mode: %s). Willingness-to-pay $%s/QALY; costs in 2025 USD; 3%% discounting; lifetime horizon unless stated.",
-                format(Sys.time(), "%Y-%m-%d %H:%M"), CKM_MODE, format(WTP_THRESHOLD, big.mark = ",")), "")
+        sprintf("Generated %s (mode: %s; kidney effects: %s). Willingness-to-pay $%s/QALY; costs in 2025 USD; 3%% discounting; lifetime horizon unless stated.",
+                format(Sys.time(), "%Y-%m-%d %H:%M"), CKM_MODE,
+                if (CKM_ANALYSIS == "hr") "HR-derived" else "trial-slope-matched", format(WTP_THRESHOLD, big.mark = ",")), "")
 
 # ---- Base case ----
 base_arms <- fread(tab(sprintf("base_case_stage%d_arms.csv", STAGE)))
@@ -132,6 +133,18 @@ if (!is.null(scen_inc)) {
   }
 }
 
+# ---- Full incremental analysis (efficient frontier): base case and structural scenarios ----
+fr_in <- rbind(base_arms[, .(scenario = "Base case", arm, costs, qalys)],
+               if (!is.null(scen_inc)) scen_arms[!grepl("^Agents:", scenario), .(scenario, arm, costs, qalys)])
+frontier <- fr_in[, efficient_frontier(setNames(costs, arm), setNames(qalys, arm)), by = scenario]
+frontier[, `:=`(label = unname(ARM_LABELS[arm]), vs_label = unname(ARM_LABELS[vs]))]
+fwrite(frontier, tab(sprintf("frontier_stage%d.csv", STAGE)))
+md <- c(md, "## Full incremental analysis (efficient frontier)", "",
+        md_table(frontier[arm != "soc", .(Scenario = scenario, Strategy = label, Status = status,
+                                          `Frontier comparator` = ifelse(is.na(vs_label), "", vs_label),
+                                          `Frontier ICER` = ifelse(is.na(frontier_icer), "",
+                                                                   sprintf("$%s/QALY", format(round(frontier_icer, -2), big.mark = ","))))]), "")
+
 # ---- DSA ----
 dsa_res <- read_files(sprintf("^dsa_stage%d_shard[0-9]+(_part[0-9]+)?[.]csv$", STAGE))
 if (!is.null(dsa_res)) {
@@ -155,12 +168,12 @@ if (!is.null(dsa_res)) {
                                `Bounds changing sign` = n_sign_changes, `Top 5 drivers` = top_drivers)]), "")
   for (cmp in base_inc$comparison) {
     p <- generate_tornado(dsa_res, base_inc, cmp, outcome = "inmb", top_n = 15, wtp = WTP_THRESHOLD)
-    ggsave(sprintf("outputs/figures/tornado_stage%d_%s.png", STAGE, slug(cmp)), p, width = 10, height = 7, dpi = 300)
+    ggsave(sprintf("%s/figures/tornado_stage%d_%s.png", OUT_DIR, STAGE, slug(cmp)), p, width = 10, height = 7, dpi = 300)
   }
 }
 
 # ---- PSA ----
-psa_files <- list.files("outputs/psa", pattern = sprintf("^psa_stage%d_chunk[0-9]+[.]rds$", STAGE), full.names = TRUE)
+psa_files <- list.files(file.path(OUT_DIR, "psa"), pattern = sprintf("^psa_stage%d_chunk[0-9]+[.]rds$", STAGE), full.names = TRUE)
 if (length(psa_files) > 0) {
   chunks <- lapply(psa_files, readRDS)
   info <- rbindlist(lapply(seq_along(chunks), function(k) {
@@ -191,9 +204,9 @@ if (length(psa_files) > 0) {
   fwrite(psa_sum, tab(sprintf("psa_stage%d_summary.csv", STAGE)))
   fwrite(conv, tab(sprintf("psa_stage%d_convergence.csv", STAGE)))
   fwrite(ceac, tab(sprintf("psa_stage%d_ceac.csv", STAGE)))
-  ggsave(sprintf("outputs/figures/ce_plane_stage%d.png", STAGE), plot_ce_plane(results_like, wtp = WTP_THRESHOLD),
+  ggsave(sprintf("%s/figures/ce_plane_stage%d.png", OUT_DIR, STAGE), plot_ce_plane(results_like, wtp = WTP_THRESHOLD),
          width = 8, height = 6, dpi = 300)
-  ggsave(sprintf("outputs/figures/ceac_stage%d.png", STAGE), plot_ceac(ceac), width = 8, height = 6, dpi = 300)
+  ggsave(sprintf("%s/figures/ceac_stage%d.png", OUT_DIR, STAGE), plot_ceac(ceac), width = 8, height = 6, dpi = 300)
   md <- c(md, "## Probabilistic sensitivity analysis", "",
           md_table(psa_sum[, .(Comparison = comparison, Iterations = n_iterations, `Patients/iteration` = patients_per_iteration,
                                `Mean inc. cost` = fmt_usd(mean_inc_cost), `Mean inc. QALYs` = sprintf("%.3f", mean_inc_qaly),
@@ -205,6 +218,6 @@ if (length(psa_files) > 0) {
             , .(WTP = fmt_usd(wtp), `SGLT2i + SoC` = pct(100 * sglt2i), `GLP-1 RA + SoC` = pct(100 * glp1ra), SoC = pct(100 * soc))]), "")
 }
 
-writeLines(md, "outputs/RESULTS_SUMMARY.md")
+writeLines(md, file.path(OUT_DIR, "RESULTS_SUMMARY.md"))
 cat(paste(md, collapse = "\n"), "\n")
 cat("\n=== Combine Complete ===\n")

@@ -25,7 +25,7 @@ suppressMessages({
 
 STAGE <- 3
 WTPS <- c(50000, 100000, 120000, 150000)
-tab <- function(x) sprintf("outputs/tables/%s", x)
+tab <- function(x) sprintf("%s/tables/%s", OUT_DIR, x)
 ps <- fread(tab(sprintf("patient_level_stage%d.csv.gz", STAGE)))
 p0 <- drug_prices(l_params)
 
@@ -96,7 +96,7 @@ pts <- data.table(
   p_s = c(eff(p0, "sglt2i"), eff(price_sets[["All commercial"]], "sglt2i"), mfp_s,
           eff(price_sets[["Generic dapagliflozin with type 2 diabetes, brand without"]], "sglt2i")),
   p_g = c(eff(p0, "glp1ra"), eff(price_sets[["All commercial"]], "glp1ra"), mfp_g, eff(p0, "glp1ra")))
-dir.create("outputs/figures", recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(OUT_DIR, "figures"), recursive = TRUE, showWarnings = FALSE)
 g <- ggplot(grid, aes(p_s, p_g, fill = preferred)) +
   geom_raster() +
   scale_fill_manual(values = c("SGLT2i + SoC" = "#9ecae1", "GLP-1 RA + SoC" = "#fdae6b", "SoC alone" = "#d9d9d9"),
@@ -107,5 +107,5 @@ g <- ggplot(grid, aes(p_s, p_g, fill = preferred)) +
   scale_y_continuous(labels = scales::dollar, expand = c(0, 0)) +
   labs(x = "SGLT2i annual price (all payers)", y = "GLP-1 RA annual price (all payers)") +
   theme_minimal(base_size = 11) + theme(legend.position = "bottom", plot.margin = margin(5, 20, 5, 5))
-ggsave(sprintf("outputs/figures/price_surface_stage%d.png", STAGE), g, width = 7, height = 6, dpi = 300)
+ggsave(sprintf("%s/figures/price_surface_stage%d.png", OUT_DIR, STAGE), g, width = 7, height = 6, dpi = 300)
 cat("Price scenarios written.\n")

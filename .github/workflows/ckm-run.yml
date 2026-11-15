@@ -4,6 +4,9 @@
 # task=dsa-shards reruns only the listed DSA shards (as smaller jobs: one parameter
 # per R process) and rebuilds the results from an earlier full run (reuse_run_id):
 #   gh workflow run ckm-run.yml -f mode=production -f task=dsa-shards -f shards="[7, 8]" -f reuse_run_id=<ID>
+# analysis=matched runs the co-primary analysis with trial-slope-matched kidney
+# effects (base case, DSA, PSA; no scenarios) into artifact ckm-results-<mode>-matched:
+#   gh workflow run ckm-run.yml -f mode=pilot -f analysis=matched
 # Each job runs on its own cloud machine (2 vCPU, 7 GB; public repositories use
 # standard runners free of charge). Jobs marked "2 processes"
 # run two R processes side by side so both vCPUs are used (billing is per job
@@ -22,6 +25,12 @@ on:
         default: pilot
         type: choice
         options: [pilot, production]
+      analysis:
+        description: "hr = kidney effects from meta-analysis HRs (with scenarios); matched = trial-slope-matched kidney effects (base, DSA, PSA)"
+        required: true
+        default: hr
+        type: choice
+        options: [hr, matched]
       task:
         description: "full = whole run; dsa-shards = rerun only the DSA shards below"
         required: true
@@ -49,6 +58,9 @@ concurrency:
 
 env:
   CKM_MODE: ${{ inputs.mode }}
+  CKM_ANALYSIS: ${{ inputs.analysis }}
+  CKM_OUT: outputs
+  RESULTS_NAME: ckm-results-${{ inputs.mode }}${{ inputs.analysis == 'matched' && '-matched' || '' }}
 
 jobs:
   check:
@@ -88,6 +100,7 @@ jobs:
   scenarios:
     name: Scenarios ${{ matrix.group }} parts ${{ matrix.a }}+${{ matrix.b }} (2 processes)
     needs: check
+    if: ${{ inputs.analysis == 'hr' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 300
     strategy:
@@ -210,7 +223,7 @@ jobs:
         run: cat outputs/RESULTS_SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: ckm-results-${{ inputs.mode }}
+          name: ${{ env.RESULTS_NAME }}
           path: outputs/
           retention-days: 90
 
@@ -256,7 +269,7 @@ jobs:
       # Base case, scenarios, the other DSA shards and the PSA from the earlier run
       - uses: actions/download-artifact@v4
         with:
-          name: ckm-results-${{ inputs.mode }}
+          name: ${{ env.RESULTS_NAME }}
           run-id: ${{ inputs.reuse_run_id }}
           github-token: ${{ github.token }}
           path: outputs
@@ -273,6 +286,6 @@ jobs:
         run: cat outputs/RESULTS_SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: ckm-results-${{ inputs.mode }}
+          name: ${{ env.RESULTS_NAME }}
           path: outputs/
           retention-days: 90

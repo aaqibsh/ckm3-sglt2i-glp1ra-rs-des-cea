@@ -31,7 +31,7 @@ source("R/11_patient_outputs.R")
 
 stages <- stages_from_args()
 n_pat  <- RUN_SIZES$base_patients
-dir.create("outputs/tables", recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(OUT_DIR, "tables"), recursive = TRUE, showWarnings = FALSE)
 
 for (stage in stages) {
   cat(sprintf("\n--- CKM Stage %d: %d patients ---\n", stage, n_pat))
@@ -47,8 +47,8 @@ for (stage in stages) {
                           icer_label, inmb = round(inmb))])
   cat(sprintf("Run time: %.1f minutes\n", t_run[3] / 60))
 
-  fwrite(s$arms, sprintf("outputs/tables/base_case_stage%d_arms.csv", stage))
-  fwrite(s$incremental, sprintf("outputs/tables/base_case_stage%d_incremental.csv", stage))
+  fwrite(s$arms, sprintf("%s/tables/base_case_stage%d_arms.csv", OUT_DIR, stage))
+  fwrite(s$incremental, sprintf("%s/tables/base_case_stage%d_incremental.csv", OUT_DIR, stage))
 
   # ---- Patient-level outputs (subgroups, event burden, validation) ----
   pop <- generate_ckm_population(n_pat, ckm_stage = stage, seed = SEED)
@@ -57,15 +57,15 @@ for (stage in stages) {
                              unname(res[[1]][[1]]$total_costs[sort(names(res[[1]][[1]]$total_costs))]))))
   thr <- threshold_prices(ps, l_params)[, stage := stage]
   print(thr[wtp == WTP_THRESHOLD, .(comparison, current_price, threshold_price = round(threshold_price))])
-  fwrite(thr, sprintf("outputs/tables/threshold_prices_stage%d.csv", stage))
-  fwrite(ps, sprintf("outputs/tables/patient_level_stage%d.csv.gz", stage))
+  fwrite(thr, sprintf("%s/tables/threshold_prices_stage%d.csv", OUT_DIR, stage))
+  fwrite(ps, sprintf("%s/tables/patient_level_stage%d.csv.gz", OUT_DIR, stage))
   fwrite(subgroup_table(ps, wtp = WTP_THRESHOLD)[, stage := stage],
-         sprintf("outputs/tables/subgroups_stage%d.csv", stage))
-  fwrite(event_table(ps)[, stage := stage], sprintf("outputs/tables/events_stage%d.csv", stage))
-  fwrite(validation_table(ps)[, stage := stage], sprintf("outputs/tables/validation_stage%d.csv", stage))
-  fwrite(risk_distribution(ps)[, stage := stage], sprintf("outputs/tables/risk_distribution_stage%d.csv", stage))
+         sprintf("%s/tables/subgroups_stage%d.csv", OUT_DIR, stage))
+  fwrite(event_table(ps)[, stage := stage], sprintf("%s/tables/events_stage%d.csv", OUT_DIR, stage))
+  fwrite(validation_table(ps)[, stage := stage], sprintf("%s/tables/validation_stage%d.csv", OUT_DIR, stage))
+  fwrite(risk_distribution(ps)[, stage := stage], sprintf("%s/tables/risk_distribution_stage%d.csv", OUT_DIR, stage))
   print(validation_table(ps))
-  save(s, thr, file = sprintf("outputs/base_case_stage%d.RData", stage))
+  save(s, thr, file = sprintf("%s/base_case_stage%d.RData", OUT_DIR, stage))
 
   if (stage == 3) {
     cat("\n--- Validations (Stage 3) ---\n")

@@ -43,6 +43,15 @@ options(scipen = 999, digits = 4)
 CKM_MODE <- Sys.getenv("CKM_MODE", "pilot")
 if (!CKM_MODE %in% c("pilot", "production")) stop("CKM_MODE must be 'pilot' or 'production'")
 
+# Kidney-effect construction (co-primary analyses, R4; D-042), applied in
+# 01_parameters.R: "hr" = slope ratios from the meta-analysis event HRs;
+# "matched" = slope ratios matched to the DAPA-CKD and FLOW total-slope differences.
+CKM_ANALYSIS <- Sys.getenv("CKM_ANALYSIS", "hr")
+if (!CKM_ANALYSIS %in% c("hr", "matched")) stop("CKM_ANALYSIS must be 'hr' or 'matched'")
+# Output folder: outputs/ for "hr", outputs_matched/ for "matched" (CKM_OUT overrides;
+# the cloud workflow sets CKM_OUT=outputs on every fresh runner)
+OUT_DIR <- Sys.getenv("CKM_OUT", if (CKM_ANALYSIS == "hr") "outputs" else "outputs_matched")
+
 RUN_SIZES <- list(
   pilot = list(
     base_patients = 500,   scen_patients = 200,   dsa_patients = 500,
@@ -76,4 +85,4 @@ stages_from_args <- function(default = c(2, 3, 4)) {
   if (length(args) == 0 || is.na(st)) default else st
 }
 
-cat(sprintf("CKM_MODE = %s\n", CKM_MODE))
+cat(sprintf("CKM_MODE = %s; CKM_ANALYSIS = %s; outputs in %s/\n", CKM_MODE, CKM_ANALYSIS, OUT_DIR))

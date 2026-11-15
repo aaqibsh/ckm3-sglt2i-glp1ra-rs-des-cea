@@ -44,7 +44,7 @@ CKM_MODE=production Rscript analysis/combine_results.R
 Rscript scripts/price_scenarios.R
 ```
 
-On a single core the production analysis takes more than a day. The workflow `.github/workflows/ckm-run.yml` runs the same scripts in parallel on GitHub Actions (Actions tab, "CKM model run", mode `pilot` first, then `production`); results are uploaded as the artifact `ckm-results-<mode>` and summarised on the run page. Common random numbers and fixed seeds make every run reproducible.
+On a single core the production analysis takes more than a day. The workflow `.github/workflows/ckm-run.yml` runs the same scripts in parallel on GitHub Actions (Actions tab, "CKM model run", mode `pilot` first, then `production`); results are uploaded as the artifact `ckm-results-<mode>` and summarised on the run page. The input `analysis` selects the kidney-effect construction: `hr` (slope ratios from the meta-analysis hazard ratios, with all scenarios) or `matched` (co-primary analysis with slope ratios matched to the DAPA-CKD and FLOW eGFR slope differences: base case, one-way and probabilistic analyses; artifact `ckm-results-<mode>-matched`; locally `CKM_ANALYSIS=matched`, outputs in `outputs_matched/`). Common random numbers and fixed seeds make every run reproducible.
 
 ## Development and use of AI tools
 

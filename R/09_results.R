@@ -113,6 +113,41 @@ compare_arms <- function(res, int, comp, wtp = 120000) {
   )
 }
 
+#' Full incremental analysis (efficient frontier) of all strategies
+#'
+#' Strategies are ordered by cost; strongly dominated strategies (costlier and no
+#' more effective than another) are removed, then extendedly dominated ones (an
+#' ICER higher than that of the next more effective strategy). ICERs on the
+#' frontier are vs the next less costly frontier strategy.
+#'
+#' @param costs,qalys Named numeric vectors (one value per strategy)
+#' @return data.table: arm, costs, qalys, status ("frontier", "dominated",
+#'   "extendedly dominated"), vs (comparator on the frontier), frontier_icer
+efficient_frontier <- function(costs, qalys) {
+  d <- data.table(arm = names(costs), costs = unname(costs), qalys = unname(qalys[names(costs)]),
+                  status = "frontier")
+  setorder(d, costs, -qalys)
+  for (k in seq_len(nrow(d))) {
+    if (any(d$costs[-k] <= d$costs[k] & d$qalys[-k] >= d$qalys[k] &
+            (d$costs[-k] < d$costs[k] | d$qalys[-k] > d$qalys[k]))) d$status[k] <- "dominated"
+  }
+  repeat {
+    f <- which(d$status == "frontier")
+    if (length(f) < 3) break
+    icers <- diff(d$costs[f]) / diff(d$qalys[f])
+    w <- which(diff(icers) < 0)
+    if (length(w) == 0) break
+    d$status[f[w[1] + 1]] <- "extendedly dominated"
+  }
+  f <- which(d$status == "frontier")
+  d[, `:=`(vs = NA_character_, frontier_icer = NA_real_)]
+  if (length(f) > 1) {
+    d$vs[f[-1]] <- d$arm[f[-length(f)]]
+    d$frontier_icer[f[-1]] <- diff(d$costs[f]) / diff(d$qalys[f])
+  }
+  d[]
+}
+
 #' Deterministic summary: per-arm outcomes and pairwise incremental results
 #'
 #' @param results Output from WARDEN run_sim() (deterministic)

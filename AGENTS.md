@@ -1,9 +1,9 @@
 # AGENTS.md — CKM-HEOR Project
 
 > **Project**: Health Economic Model for Cardiovascular-Kidney-Metabolic (CKM) Syndrome  
-> **Status**: R3 revision after the third pre-submission review (Nov 2026; plan `manuscript/R3_PLAN.md`). R3 code (PREVENT full model, kidney recalibration, sourced 2025 costs, GLP-1 RA price by diabetes, 26 scenarios) done and piloted locally; R3 production run pending. R2 results in `outputs/` (run 39934023863). R3 deliverables go to `manuscript/revised/R3/` (tracked Word files, author "Author"; response table in markdown); log in `manuscript/NOTES.md`.  
+> **Status**: R4 revision after the fourth pre-submission review (Nov 2026; plan `manuscript/R4_PLAN.md`; branch r4-revision). Co-primary analyses: kidney effects HR-derived (`outputs/`, R3 run 42577707059) and trial-slope-matched (`CKM_ANALYSIS=matched`, `outputs_matched/`; cloud run pending). Full incremental analysis (`frontier_stage3.csv`). R3 deliverables in `manuscript/revised/R3/`; R4 deliverables go to `manuscript/revised/R4/` (tracked Word files, author "Author"; response table in markdown); log in `manuscript/NOTES.md`.  
 > **Engine**: WARDEN DES v2.0.6 (R package)  
-> **Last Updated**: 2026-11-09 (R3: third pre-submission review; branch r3-revision; decisions D-037 to D-041)
+> **Last Updated**: 2026-11-15 (R4: fourth pre-submission review; decisions D-042, D-043)
 
 ---
 
@@ -152,7 +152,12 @@ Single core throughout: ~0.02 s per patient per simulation on the M2 (~30 h tota
 - Results: pairwise increments with CE-plane quadrant labels, INMB, tornado, CE plane, CEAC
 - Validation: 12 end-to-end checks + helper unit checks
 
-### ✅ Phase 9 — R3 after third pre-submission review (2026-11-09; code done, production run pending)
+### ✅ Phase 10 — R4 after fourth pre-submission review (2026-11-15)
+1. **Co-primary trial-slope-matched analysis** (`CKM_ANALYSIS=matched`; ratios 0.709/0.575 with CIs from the trial slope differences; base case, DSA and PSA; outputs in `outputs_matched/`) (D-042).
+2. **Full incremental analysis** (`efficient_frontier()`; frontier table for base case and scenarios) (D-043).
+3. Every run script writes to `OUT_DIR` (00_setup.R); the cloud workflow has input `analysis` (hr | matched).
+
+### ✅ Phase 9 — R3 after third pre-submission review (2026-11-09; production run 42577707059 complete)
 1. **PREVENT full model** (UACR + HbA1c, SDI missing) in the base case, matching preventr; HbA1c model as a scenario (D-037).
 2. **Kidney decline recalibrated** to KFRE by eGFR band and DAPA-CKD/FLOW placebo slopes at the trials' baseline eGFR/UACR; decline ×1.25 below eGFR 30 (D-038).
 3. **Costs re-sourced** (HCUP 2022, Ward 2014, Tisdale/Erickson by CKD stage 3a/3b/4, USRDS hemodialysis, MEPS 2022) and inflated to 2025 USD with the PCE health index (D-039).
@@ -234,4 +239,5 @@ When working on this project:
 6. **Drug prices**: never compute drug cost by hand; prices change by payer at `age_medicare` (`medicare` event) and are split into `c_drug_com`/`c_drug_mcr`. Price scenarios use `reprice()`.
 7. **State changes go through the helpers**: in reactions, call `refresh_kidney(environment())` after anything that changes the eGFR slope, and `refresh_hazards(environment())` after anything that changes event hazards. Never modify pending event times by hand.
 8. **Parameters**: add new parameters as rows in `build_param_lists()` (optional 8th/9th elements are PSA/DSA indicators), give them a label in `PARAM_LABELS` (09_results.R), then regenerate `docs/PARAMETER_SOURCES.md`. `run_ckm_model(params = ...)` injects the lists into `input_block()` by value.
-9. **add_item pipe gotcha**: `add_item()` only evaluates a pipe LHS that is a symbol or an `add_item()`/`input_block()` call; assign other blocks to a variable first.
+9. **Output folder**: run scripts write to `OUT_DIR` (outputs/ for `CKM_ANALYSIS=hr`, outputs_matched/ for `matched`; `CKM_OUT` overrides). Never hard-code "outputs/" in a run script.
+10. **add_item pipe gotcha**: `add_item()` only evaluates a pipe LHS that is a symbol or an `add_item()`/`input_block()` call; assign other blocks to a variable first.

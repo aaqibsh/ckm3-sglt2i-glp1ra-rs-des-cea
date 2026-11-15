@@ -36,10 +36,10 @@ stopifnot(stage %in% c(2, 3, 4), all(chunks %in% seq_len(N_PSA_CHUNKS)))
 
 n_pat  <- RUN_SIZES$psa_patients
 n_sim  <- RUN_SIZES$psa_sims_per_chunk
-dir.create("outputs/psa", recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(OUT_DIR, "psa"), recursive = TRUE, showWarnings = FALSE)
 
 for (chunk in chunks) {
-  f <- sprintf("outputs/psa/psa_stage%d_chunk%d.rds", stage, chunk)
+  f <- sprintf("%s/psa/psa_stage%d_chunk%d.rds", OUT_DIR, stage, chunk)
   if (file.exists(f)) {
     cat(sprintf("Stage %d chunk %d already saved (%s); skipping\n", stage, chunk, f))
     next

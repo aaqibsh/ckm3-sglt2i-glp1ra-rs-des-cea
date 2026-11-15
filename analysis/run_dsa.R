@@ -48,15 +48,15 @@ EXCLUDED <- c("drc", "drq", "horizon_years")
 DSA_PARAMS <- pnames[unlist(l_params$dsa_indicators) == 1 & !pnames %in% EXCLUDED]
 cat(sprintf("%d parameters in the one-way DSA, %d shards\n", length(DSA_PARAMS), n_shards))
 
-dir.create("outputs/tables", recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(OUT_DIR, "tables"), recursive = TRUE, showWarnings = FALSE)
 
 for (shard in shards) {
   shard_params <- DSA_PARAMS[(seq_along(DSA_PARAMS) - 1) %% n_shards + 1 == shard]
   # Patient seeds do not depend on which parameters share a run, so a part gives
   # exactly the rows the whole shard would have given for its parameters
   shard_params <- shard_params[(seq_along(shard_params) - 1) %% n_parts + 1 == part]
-  f <- if (n_parts == 1) sprintf("outputs/tables/dsa_stage%d_shard%d.csv", stage, shard) else
-    sprintf("outputs/tables/dsa_stage%d_shard%d_part%d.csv", stage, shard, part)
+  f <- if (n_parts == 1) sprintf("%s/tables/dsa_stage%d_shard%d.csv", OUT_DIR, stage, shard) else
+    sprintf("%s/tables/dsa_stage%d_shard%d_part%d.csv", OUT_DIR, stage, shard, part)
   if (length(shard_params) == 0) next
   cat(sprintf("\n===== Stage %d, shard %d/%d%s: %d patients; %s =====\n",
               stage, shard, n_shards, if (n_parts > 1) sprintf(", part %d/%d", part, n_parts) else "",

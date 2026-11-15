@@ -384,5 +384,38 @@ set_param_values <- function(params, values) {
   params
 }
 
-# Build global parameter lists (sourced once at startup)
+# ---- Trial-slope-matched kidney effects (co-primary analysis; R4, D-042) ----
+# Slope ratios that reproduce the trial total eGFR slope differences at the
+# trials' baseline eGFR and UACR, where the model's untreated decline is 3.265
+# (DAPA-CKD) and 2.727 (FLOW) mL/min/1.73 m2 per year (scripts/kidney_slope_check.R):
+# ratio = 1 - difference / untreated decline. Differences: dapagliflozin vs placebo
+# 0.95 (95% CI 0.63-1.27; Heerspink et al. Lancet Diabetes Endocrinol 2021);
+# semaglutide vs placebo 1.16 (0.86-1.47; Perkovic et al. NEJM 2024). The CI of
+# each ratio comes from the trial CI (lognormal in the PSA; DSA bounds = CI).
+MATCHED_KIDNEY <- data.frame(
+  parameter = c("sglt2i_egfr_slope_ratio", "glp1_egfr_slope_ratio"),
+  est = c(0.709, 0.575), lo = c(0.611, 0.461), hi = c(0.807, 0.685)
+)
+
+#' Apply the trial-slope-matched kidney slope ratios (point value, PSA, DSA)
+#' @param params Parameter lists
+#' @return Modified parameter lists
+set_kidney_matched <- function(params) {
+  pnames <- unlist(params$parameter_name)
+  for (r in seq_len(nrow(MATCHED_KIDNEY))) {
+    k <- match(MATCHED_KIDNEY$parameter[r], pnames)
+    if (is.na(k)) stop("Unknown parameter: ", MATCHED_KIDNEY$parameter[r])
+    est <- MATCHED_KIDNEY$est[r]; lo <- MATCHED_KIDNEY$lo[r]; hi <- MATCHED_KIDNEY$hi[r]
+    params$base_value[[k]] <- est
+    params$a[[k]] <- log(est)
+    params$b[[k]] <- (log(hi) - log(lo)) / 3.92
+    params$DSA_min[[k]] <- lo
+    params$DSA_max[[k]] <- hi
+  }
+  params
+}
+
+# Build global parameter lists (sourced once at startup); CKM_ANALYSIS (00_setup.R)
+# selects the kidney-effect construction for every run script
 l_params <- build_param_lists()
+if (exists("CKM_ANALYSIS") && CKM_ANALYSIS == "matched") l_params <- set_kidney_matched(l_params)

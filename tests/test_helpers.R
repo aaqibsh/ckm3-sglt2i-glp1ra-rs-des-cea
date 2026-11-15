@@ -137,6 +137,25 @@ check("threshold price: GLP-1 RA vs SoC, commercial price", abs(g_soc[1, thresho
 check("threshold price: GLP-1 RA vs SoC, single price", abs(g_soc[2, threshold_price] -
         (r0$arms[arm == "glp1ra", drug_cost] + inmb0) / 5) < 1e-6)
 
+# Efficient frontier: R3 combined conservative scenario (SGLT2i extendedly dominated),
+# trial-slope-matched scenario (GLP-1 RA extendedly dominated) and base case
+# (GLP-1 RA dominated)
+ef <- efficient_frontier(c(soc = 0, sglt2i = 12318, glp1ra = 14336), c(soc = 0, sglt2i = 0.214, glp1ra = 0.253))
+check("frontier: SGLT2i extendedly dominated, GLP-1 RA vs SoC",
+      ef[arm == "sglt2i", status] == "extendedly dominated" && ef[arm == "glp1ra", vs] == "soc" &&
+        abs(ef[arm == "glp1ra", frontier_icer] - 14336 / 0.253) < 1e-6)
+ef <- efficient_frontier(c(soc = 0, sglt2i = 11112, glp1ra = 9539), c(soc = 0, sglt2i = 0.245, glp1ra = 0.181))
+check("frontier: GLP-1 RA extendedly dominated, SGLT2i vs SoC",
+      ef[arm == "glp1ra", status] == "extendedly dominated" && ef[arm == "sglt2i", vs] == "soc")
+ef <- efficient_frontier(c(soc = 0, sglt2i = 8620, glp1ra = 15921), c(soc = 0, sglt2i = 0.265, glp1ra = 0.135))
+check("frontier: GLP-1 RA dominated in the base case", ef[arm == "glp1ra", status] == "dominated" &&
+        ef[arm == "sglt2i", status] == "frontier")
+ef <- efficient_frontier(c(soc = 0, sglt2i = 5000, glp1ra = 20000), c(soc = 0, sglt2i = 0.2, glp1ra = 0.3))
+check("frontier: both on the frontier", all(ef$status == "frontier") && abs(ef[arm == "glp1ra", frontier_icer] - 150000) < 1e-6)
+pm <- set_kidney_matched(l_params); k <- match("glp1_egfr_slope_ratio", unlist(pm$parameter_name))
+check("matched kidney ratios: value, PSA log-mean and DSA bounds",
+      pm$base_value[[k]] == 0.575 && abs(pm$a[[k]] - log(0.575)) < 1e-12 && pm$DSA_min[[k]] == 0.461 && pm$DSA_max[[k]] == 0.685)
+
 pop <- generate_ckm_population(5000, 3, seed = 42)
 check("non-diabetic HbA1c < 6.5%", all(pop[diabetes == 0, hba1c] < 6.5))
 check("eGFR within [20, 100], no point mass at bound", min(pop$egfr) >= 20 && mean(pop$egfr == 20) == 0)
