@@ -4,13 +4,18 @@
 # =============================================================================
 # Usage:  Rscript scripts/generate_manuscript_figures.R [output_dir]
 #         (default output_dir: manuscript/figures)
-# Run after analysis/combine_results.R. Every number shown is read from
-# outputs/tables, so figures and tables cannot disagree. Figures carry no
-# in-figure titles (legends carry them); 300 dpi PNG plus vector PDF.
-#   Figure 1: cost-effectiveness planes, (A) SGLT2i + SoC vs SoC,
-#             (B) SGLT2i + SoC vs GLP-1 RA + SoC
-#   Figure 2: cost-effectiveness acceptability curves
-#   Figure 3: one-way sensitivity tornados (INMB), (A) vs SoC, (B) head-to-head
+# Run after analysis/combine_results.R for both co-primary analyses. Every
+# number shown is read from outputs/tables (HR-derived kidney effects) and
+# outputs_matched/tables (trial-slope-matched kidney effects), so figures and
+# tables cannot disagree. Figures carry no in-figure titles (legends carry
+# them); 300 dpi PNG plus vector PDF.
+#   Figure 1: cost-effectiveness planes; HR-derived (A) SGLT2i + SoC vs SoC,
+#             (B) SGLT2i + SoC vs GLP-1 RA + SoC; trial-slope-matched (C), (D)
+#   Figure 2: cost-effectiveness acceptability curves, (A) HR-derived,
+#             (B) trial-slope-matched
+#   Figure 3: one-way sensitivity tornados (INMB), HR-derived, (A) vs SoC,
+#             (B) head-to-head
+#   eFigure (tornado_matched): Figure 3 for the trial-slope-matched analysis (panels side by side)
 # =============================================================================
 
 suppressPackageStartupMessages({
@@ -24,7 +29,8 @@ source("R/09_results.R")   # PARAM_LABELS
 args <- commandArgs(trailingOnly = TRUE)
 out_dir <- if (length(args) >= 1) args[1] else "manuscript/figures"
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
-tab <- function(x) fread(file.path("outputs/tables", x))
+DIR_HR <- "outputs"; DIR_MATCHED <- "outputs_matched"
+tab <- function(x, dir = DIR_HR) fread(file.path(dir, "tables", x))
 
 WTP <- 120000
 COLOR_SGLT2I <- "#1B365D"; COLOR_GLP1RA <- "#8B263E"; COLOR_SOC <- "#5C6F84"; COLOR_WTP <- "#333333"
@@ -50,11 +56,9 @@ save_fig <- function(p, name, w, h) {
 usd <- function(x) paste0(ifelse(x < 0, "-$", "$"), format(round(abs(x)), big.mark = ",", trim = TRUE))
 
 # ---- Figure 1: CE planes ----
-psa <- tab("psa_stage3_iterations.csv")
-psa_sum <- tab("psa_stage3_summary.csv")
-ce_panel <- function(cmp, colour) {
-  d <- psa[comparison == cmp]
-  s <- psa_sum[comparison == cmp]
+ce_panel <- function(cmp, colour, dir) {
+  d <- tab("psa_stage3_iterations.csv", dir)[comparison == cmp]
+  s <- tab("psa_stage3_summary.csv", dir)[comparison == cmp]
   xr <- range(c(0, d$inc_qaly)); yr <- range(c(0, d$inc_cost))
   ggplot(d, aes(inc_qaly, inc_cost)) +
     geom_hline(yintercept = 0, color = "#888888", linewidth = 0.4) +
@@ -69,14 +73,17 @@ ce_panel <- function(cmp, colour) {
     labs(x = "Incremental QALYs", y = "Incremental lifetime cost (2025 US $)") +
     theme_pub()
 }
-fig1 <- (ce_panel(CMP_SOC, COLOR_SGLT2I) | ce_panel(CMP_H2H, COLOR_GLP1RA)) + plot_annotation(tag_levels = "A")
-save_fig(fig1, "figure1_ce_plane", 10, 4.6)
+fig1 <- (ce_panel(CMP_SOC, COLOR_SGLT2I, DIR_HR) | ce_panel(CMP_H2H, COLOR_GLP1RA, DIR_HR)) /
+  (ce_panel(CMP_SOC, COLOR_SGLT2I, DIR_MATCHED) | ce_panel(CMP_H2H, COLOR_GLP1RA, DIR_MATCHED)) +
+  plot_annotation(tag_levels = "A")
+save_fig(fig1, "figure1_ce_plane", 10, 8.8)
 
 # ---- Figure 2: CEAC ----
-ceac <- tab("psa_stage3_ceac.csv")
+ceac_panel <- function(dir) {
+ceac <- tab("psa_stage3_ceac.csv", dir)
 ceac[, Strategy := factor(comparator, levels = c("sglt2i", "glp1ra", "soc"),
                           labels = c("SGLT2i + SoC", "GLP-1 RA + SoC", "SoC alone"))]
-fig2 <- ggplot(ceac[wtp <= 200000], aes(wtp, prob_best, color = Strategy, linetype = Strategy)) +
+ggplot(ceac[wtp <= 200000], aes(wtp, prob_best, color = Strategy, linetype = Strategy)) +
   geom_vline(xintercept = WTP, linetype = "dashed", color = COLOR_WTP, linewidth = 0.6) +
   geom_line(linewidth = 1) +
   scale_color_manual(values = c("SGLT2i + SoC" = COLOR_SGLT2I, "GLP-1 RA + SoC" = COLOR_GLP1RA, "SoC alone" = COLOR_SOC)) +
@@ -85,12 +92,15 @@ fig2 <- ggplot(ceac[wtp <= 200000], aes(wtp, prob_best, color = Strategy, linety
   scale_y_continuous(labels = percent_format(accuracy = 1), limits = c(0, 1)) +
   labs(x = "Willingness-to-pay threshold ($/QALY)", y = "Probability strategy is preferred") +
   theme_pub()
-save_fig(fig2, "figure2_ceac", 7, 4.8)
+}
+fig2 <- (ceac_panel(DIR_HR) | ceac_panel(DIR_MATCHED)) +
+  plot_annotation(tag_levels = "A") + plot_layout(guides = "collect") & theme(legend.position = "bottom")
+save_fig(fig2, "figure2_ceac", 10, 4.8)
 
 # ---- Figure 3: tornados ----
-dsa <- tab("dsa_stage3_results.csv")
-base <- tab("base_case_stage3_incremental.csv")
-tornado_panel <- function(cmp, top_n = 15) {
+tornado_panel <- function(cmp, dir = DIR_HR, top_n = 15) {
+  dsa <- tab("dsa_stage3_results.csv", dir)
+  base <- tab("base_case_stage3_incremental.csv", dir)
   b <- base[comparison == cmp, inmb]
   w <- dcast(dsa[comparison == cmp], parameter ~ direction, value.var = c("inmb", "value"))
   w[, range := abs(inmb_DSA_max - inmb_DSA_min)]
@@ -115,6 +125,10 @@ tornado_panel <- function(cmp, top_n = 15) {
 fig3 <- (tornado_panel(CMP_SOC) / tornado_panel(CMP_H2H)) +
   plot_annotation(tag_levels = "A") + plot_layout(guides = "collect") & theme(legend.position = "bottom")
 save_fig(fig3, "figure3_tornado", 8.5, 10)
+# side by side: the eFigure sits in a landscape section of the Supplement
+efig_t <- (tornado_panel(CMP_SOC, DIR_MATCHED) | tornado_panel(CMP_H2H, DIR_MATCHED)) +
+  plot_annotation(tag_levels = "A") + plot_layout(guides = "collect") & theme(legend.position = "bottom")
+save_fig(efig_t, "efigure_tornado_matched", 14, 6.4)
 
 # eFigure 2: two-way price chart drawn by scripts/price_scenarios.R
 stopifnot(file.copy("outputs/figures/price_surface_stage3.png", file.path(out_dir, "efigure2_price_chart.png"),

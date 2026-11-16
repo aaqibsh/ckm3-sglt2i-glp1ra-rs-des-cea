@@ -3,25 +3,31 @@
 # Extra manuscript tables derived from existing production outputs (no model run)
 # =============================================================================
 # Usage:  Rscript scripts/derive_manuscript_tables.R
-# Reads outputs/tables/patient_level_stage3.csv.gz (base case, N = 20,000) and
+#         CKM_ANALYSIS=matched Rscript scripts/derive_manuscript_tables.R
+# Folder: outputs/ (CKM_ANALYSIS=hr, default) or outputs_matched/ (matched);
+# CKM_OUT overrides, as in R/00_setup.R.
+# Reads <folder>/tables/patient_level_stage3.csv.gz (base case, N = 20,000) and
 # regenerates the base-case cohort (same generator and seed as run_base_case.R,
 # checked against the patient-level file). Writes:
-#   outputs/tables/baseline_characteristics_stage3.csv  (eTable 1)
-#   outputs/tables/soc_event_rates_5y_stage3.csv         (first 5 years, SoC and
+#   <folder>/tables/baseline_characteristics_stage3.csv  (eTable 1)
+#   <folder>/tables/soc_event_rates_5y_stage3.csv         (first 5 years, SoC and
 #       treated arms: event rates per 100 patient-years for trial comparison)
-#   outputs/tables/prevent_composite_stage3.csv          (PREVENT total CVD vs
+#   <folder>/tables/prevent_composite_stage3.csv          (PREVENT total CVD vs
 #       the union of the PREVENT ASCVD and HF predictions)
-#   outputs/tables/external_benchmarks_stage3.csv        (SoC subgroups matched to
+#   <folder>/tables/external_benchmarks_stage3.csv        (SoC subgroups matched to
 #       external CKD benchmarks: life expectancy, lifetime and 5-year kidney failure,
 #       5-year death)
-#   outputs/tables/monte_carlo_error_stage3.csv          (SE of the base case)
+#   <folder>/tables/monte_carlo_error_stage3.csv          (SE of the base case)
 # =============================================================================
 
 suppressPackageStartupMessages(library(data.table))
 source("R/02_population.R")
+OUT_DIR <- Sys.getenv("CKM_OUT", if (Sys.getenv("CKM_ANALYSIS", "hr") == "hr") "outputs" else "outputs_matched")
+tab <- function(x) file.path(OUT_DIR, "tables", x)
+cat(sprintf("Reading and writing %s/tables\n", OUT_DIR))
 
 SEED <- 42; STAGE <- 3
-pl <- fread("outputs/tables/patient_level_stage3.csv.gz")
+pl <- fread(tab("patient_level_stage3.csv.gz"))
 N <- pl[arm == "soc", .N]   # 20,000 in production
 pop <- generate_ckm_population(N, ckm_stage = STAGE, seed = SEED)
 soc <- pl[arm == "soc"][order(pat_id)]
@@ -53,7 +59,7 @@ bc <- rbind(
   bin(soc$prevent_total_cvd >= 0.20, "PREVENT 10-y total CVD risk >=20%"),
   bin(soc$risk_equivalent, "Meets a Stage 3 risk equivalent")
 )
-fwrite(bc, "outputs/tables/baseline_characteristics_stage3.csv")
+fwrite(bc, tab("baseline_characteristics_stage3.csv"))
 
 # ---- First-5-year event rates per 100 patient-years (for trial placebo arms) ----
 rates5 <- pl[, {
@@ -73,13 +79,13 @@ rates5 <- pl[, {
     first_3p_mace_per_100py = 100 * first_mace5 / py_mace,
     all_death_5y_pct = 100 * mean(t_end <= 5 & grepl("^death", end_reason)))
 }, by = arm]
-fwrite(rates5, "outputs/tables/soc_event_rates_5y_stage3.csv")
+fwrite(rates5, tab("soc_event_rates_5y_stage3.csv"))
 
 # ---- PREVENT total CVD vs union of the outcome-specific predictions ----
 comp <- soc[, .(prevent_total_cvd = mean(prevent_total_cvd),
                 prevent_ascvd = mean(prevent_ascvd), prevent_hf = mean(prevent_hf),
                 union_ascvd_hf_independent = mean(1 - (1 - prevent_ascvd) * (1 - prevent_hf)))]
-fwrite(comp, "outputs/tables/prevent_composite_stage3.csv")
+fwrite(comp, tab("prevent_composite_stage3.csv"))
 
 # ---- External benchmarks (SoC arm) ----
 # Life expectancy and lifetime kidney failure from entry at age 55-65 y (Turin 2014,
@@ -101,7 +107,7 @@ benchmarks <- rbind(
   bench(mid & soc$egfr >= 45 & soc$egfr < 60, "egfr45_59_age55_65"),
   bench(mid & soc$egfr >= 30 & soc$egfr < 45, "egfr30_44_age55_65"),
   bench(soc$age >= 65 & soc$egfr >= 30 & soc$egfr < 60, "egfr30_59_age65plus"))
-fwrite(benchmarks, "outputs/tables/external_benchmarks_stage3.csv")
+fwrite(benchmarks, tab("external_benchmarks_stage3.csv"))
 print(benchmarks)
 
 print(bc[, lapply(.SD, function(x) if (is.numeric(x)) round(x, 1) else x)])
@@ -130,5 +136,5 @@ mc <- rbindlist(lapply(pairs, function(p) {
              icer = mean(dc) / mean(dq), se_icer_boot = sd(boot_icer),
              icer_boot_2.5 = quantile(boot_icer, .025), icer_boot_97.5 = quantile(boot_icer, .975))
 }))
-fwrite(mc, "outputs/tables/monte_carlo_error_stage3.csv")
+fwrite(mc, tab("monte_carlo_error_stage3.csv"))
 print(mc)
